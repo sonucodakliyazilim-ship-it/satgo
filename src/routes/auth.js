@@ -38,7 +38,6 @@ router.post("/login", async (req, res, next) => {
       'INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
       [user.id, refreshToken, refreshExpiresAt]
     );
-    await query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
 
     return res.json({
       success: true,

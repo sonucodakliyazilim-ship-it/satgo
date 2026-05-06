@@ -52,7 +52,7 @@ const getUsers = async (req, res, next) => {
     const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
     const { rows } = await query(
       `SELECT id, name, email, phone, role, status, city, listing_count,
-              rating_avg, last_login_at, created_at
+              rating_avg, created_at
        FROM users ${where}
        ORDER BY created_at DESC LIMIT $${p} OFFSET $${p + 1}`,
       [...params, PER_PAGE, offset]

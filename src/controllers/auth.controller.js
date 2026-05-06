@@ -98,9 +98,6 @@ const login = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'E-posta veya şifre hatalı.' });
     }
 
-    // Update last_login
-    await query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
-
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
     await saveRefreshToken(user.id, refreshToken);
 

@@ -7,7 +7,7 @@ const getMe = async (req, res, next) => {
     const { rows } = await query(
       `SELECT id, name, email, phone, avatar_url, bio, city, district,
               role, status, email_verified, phone_verified,
-              rating_avg, rating_count, listing_count, last_login_at, created_at
+              rating_avg, rating_count, listing_count, created_at
        FROM users WHERE id = $1`,
       [req.user.id]
     );
