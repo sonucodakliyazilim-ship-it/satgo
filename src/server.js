@@ -25,40 +25,38 @@ const adminRoutes       = require('./routes/admin.routes');
 const uploadRoutes      = require('./routes/upload.routes');
 const bannerRoutes      = require('./routes/banner.routes');
 
-const app    = express();
+const app = express();
+
+// ✅ TEK VE DOĞRU CORS
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
+
 const server = http.createServer(app);
-const configuredOrigins = (process.env.FRONTEND_URL || '')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-const allowedOrigins = new Set(configuredOrigins);
-const corsOptions = {
-  origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
-    return callback(new Error(`CORS origin not allowed: ${origin}`));
-  },
-  credentials: true,
-};
-const io     = new Server(server, {
+
+// ✅ SOCKET.IO DA AYNI ŞEKİLDE
+const io = new Server(server, {
   cors: {
-    origin: Array.from(allowedOrigins),
+    origin: true,
     methods: ['GET', 'POST'],
     credentials: true,
   }
 });
+
 app.set('io', io);
 
 // ── Middleware ────────────────────────────────────────────────
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
-app.use(cors(corsOptions));
+
 app.use(compression());
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Static files (uploaded images)
+// Static files
 const uploadRoot = path.isAbsolute(process.env.UPLOAD_DIR || '')
   ? process.env.UPLOAD_DIR
   : path.join(__dirname, '..', process.env.UPLOAD_DIR || 'uploads');
@@ -67,7 +65,7 @@ app.use('/uploads', express.static(uploadRoot));
 // Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-  max:      parseInt(process.env.RATE_LIMIT_MAX)        || (process.env.NODE_ENV === 'development' ? 10000 : 100),
+  max:      parseInt(process.env.RATE_LIMIT_MAX) || 100,
   message:  { success: false, message: 'Çok fazla istek. Lütfen bekleyin.' },
 });
 app.use('/api/', limiter);
@@ -87,11 +85,7 @@ app.use('/api/upload',     uploadRoutes);
 app.get('/api/me', auth, async (req, res, next) => {
   try {
     const { rows } = await query(
-      `SELECT id, name, email, phone, avatar_url, bio, role, status, city, district,
-              email_verified, phone_verified, rating_avg, rating_count, listing_count,
-              last_login_at, created_at, updated_at
-       FROM users
-       WHERE id = $1`,
+      `SELECT * FROM users WHERE id = $1`,
       [req.user.userId]
     );
 
@@ -108,44 +102,35 @@ app.get('/api/me', auth, async (req, res, next) => {
   }
 });
 
-// Health check
+// Health
 app.get('/api/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ success: true, message: 'ilanGO API çalışıyor', db: 'connected' });
+    res.json({ success: true, message: 'API çalışıyor', db: 'connected' });
   } catch {
     res.status(500).json({ success: false, message: 'DB bağlantısı yok' });
   }
 });
 
-// 404 handler
+// 404
 app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Endpoint bulunamadı.' });
 });
 
-// Global error handler
+// Error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  const status = err.status || 500;
-  res.status(status).json({
+  res.status(500).json({
     success: false,
     message: err.message || 'Sunucu hatası.',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
   });
 });
 
-// ── Socket.io ─────────────────────────────────────────────────
+// Socket
 socketHandler(io);
 
-// ── Start ─────────────────────────────────────────────────────
+// Start
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`
-  ╔══════════════════════════════════╗
-  ║  ilanGO API  →  port ${PORT}       ║
-  ║  ENV: ${process.env.NODE_ENV || 'development'}             ║
-  ╚══════════════════════════════════╝
-  `);
+  console.log(`Server çalışıyor: ${PORT}`);
 });
-
-module.exports = { app, io };
