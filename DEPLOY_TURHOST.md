@@ -46,15 +46,7 @@ Sunucuya proje kökündeki dosyaları yükle. Bunları yükleme:
 NODE_ENV=production
 PORT=5000
 
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=satgo_db
-DB_USER=satgo_user
-DB_PASSWORD=GERCEK_DB_SIFRESI
-DATABASE_URL=
-DB_SSL=false
-DB_POOL_MAX=10
-DB_CONNECTION_TIMEOUT_MS=10000
+DATABASE_URL=postgresql://...
 
 JWT_SECRET=COK_UZUN_RASTGELE_DEGER
 JWT_EXPIRES_IN=15m
