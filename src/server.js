@@ -9,8 +9,9 @@ const compression = require('compression');
 const rateLimit  = require('express-rate-limit');
 const path       = require('path');
 
-const { pool }   = require('./config/database');
+const { pool, query } = require('./config/database');
 const socketHandler = require('./utils/socketHandler');
+const auth = require('./middleware/auth');
 
 // Routes
 const authRoutes        = require("./routes/auth");
@@ -82,6 +83,30 @@ app.use('/api/promotions', promotionRoutes);
 app.use('/api/banners',    bannerRoutes);
 app.use('/api/admin',      adminRoutes);
 app.use('/api/upload',     uploadRoutes);
+
+app.get('/api/me', auth, async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, name, email, phone, avatar_url, bio, role, status, city, district,
+              email_verified, phone_verified, rating_avg, rating_count, listing_count,
+              last_login_at, created_at, updated_at
+       FROM users
+       WHERE id = $1`,
+      [req.user.userId]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ success: false, message: 'Kullanıcı bulunamadı' });
+    }
+
+    return res.json({
+      success: true,
+      data: rows[0],
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Health check
 app.get('/api/health', async (req, res) => {
