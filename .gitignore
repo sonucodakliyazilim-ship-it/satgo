@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Build output
+dist/
+build/
+.next/
+frontend/.next/
+frontend/out/
+*.zip
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.production.example
+!frontend/.env.production.example
+
+# Local database and runtime files
+.pgdata/
+*.log
+*.err
+postgres.log
+server.log
+server.err
+frontend/frontend.log
+frontend/frontend.err
+
+# User uploads
+uploads/*
+!**/.gitkeep
+
+# Editor/OS files
+.vscode/
+.DS_Store
+Thumbs.db
