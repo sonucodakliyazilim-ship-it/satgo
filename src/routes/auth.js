@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { v4: uuidv4 } = require('uuid');
 const authRoutes = require('./auth.routes');
 const { query } = require('../config/database');
 
@@ -22,10 +23,22 @@ router.post("/login", async (req, res, next) => {
     }
 
     const token = jwt.sign(
-      { userId: user.id },
+      { userId: user.id, role: user.role, jti: uuidv4() },
       process.env.JWT_SECRET,
       { expiresIn: "1h" }
     );
+    const refreshToken = jwt.sign(
+      { userId: user.id, role: user.role, jti: uuidv4() },
+      process.env.JWT_REFRESH_SECRET,
+      { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d" }
+    );
+    const refreshExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    await query(
+      'INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
+      [user.id, refreshToken, refreshExpiresAt]
+    );
+    await query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
 
     return res.json({
       success: true,
@@ -35,7 +48,8 @@ router.post("/login", async (req, res, next) => {
           email: user.email,
           name: user.name
         },
-        accessToken: token
+        accessToken: token,
+        refreshToken
       }
     });
   } catch (err) {

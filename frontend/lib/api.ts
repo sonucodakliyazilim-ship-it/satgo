@@ -1,15 +1,16 @@
 import axios from 'axios'
-import Cookies from 'js-cookie'
 import { API_URL } from './config'
+import { clearAuthCookies, getAccessToken, getRefreshToken, setAuthCookies } from './authCookies'
 
 export const api = axios.create({
   baseURL: API_URL,
   timeout: 15000,
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 })
 
 api.interceptors.request.use((config) => {
-  const token = Cookies.get('accessToken')
+  const token = getAccessToken()
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
@@ -20,18 +21,19 @@ api.interceptors.response.use(
     const original = error.config
     if (error.response?.status === 401 && !original._retry) {
       original._retry = true
-      const refresh = Cookies.get('refreshToken')
+      const refresh = getRefreshToken()
       if (refresh) {
         try {
-          const { data } = await axios.post(`${API_URL}/auth/refresh`, { refreshToken: refresh })
-          Cookies.set('accessToken', data.data.accessToken, { expires: 1 })
-          Cookies.set('refreshToken', data.data.refreshToken, { expires: 7 })
+          const { data } = await axios.post(
+            `${API_URL}/auth/refresh`,
+            { refreshToken: refresh },
+            { withCredentials: true },
+          )
+          setAuthCookies(data.data.accessToken, data.data.refreshToken)
           original.headers.Authorization = `Bearer ${data.data.accessToken}`
           return api(original)
         } catch {
-          Cookies.remove('accessToken')
-          Cookies.remove('refreshToken')
-          window.location.href = '/giris'
+          clearAuthCookies()
         }
       }
     }

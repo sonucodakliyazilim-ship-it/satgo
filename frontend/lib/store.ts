@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import Cookies from 'js-cookie'
 import { authApi, usersApi } from '@/lib/api'
+import { clearAuthCookies, getAccessToken, getRefreshToken, setAuthCookies } from '@/lib/authCookies'
 
 interface User {
   id: string
@@ -55,8 +55,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
     try {
       const { data } = await authApi.login({ email, password })
       const { user, accessToken, refreshToken } = data.data
-      Cookies.set('accessToken', accessToken, { expires: 1 })
-      Cookies.set('refreshToken', refreshToken, { expires: 7 })
+      setAuthCookies(accessToken, refreshToken)
       if (user) {
         set({ user, loading: false })
       } else {
@@ -77,8 +76,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
       }
       const { data } = await authApi.register(payload)
       const { user, accessToken, refreshToken } = data.data
-      Cookies.set('accessToken', accessToken, { expires: 1 })
-      Cookies.set('refreshToken', refreshToken, { expires: 7 })
+      setAuthCookies(accessToken, refreshToken)
       set({ user, loading: false })
     } finally {
       set({ loading: false })
@@ -86,22 +84,20 @@ export const useAuthStore = create<AuthStore>((set) => ({
   },
 
   logout: async () => {
-    const refresh = Cookies.get('refreshToken')
+    const refresh = getRefreshToken()
     if (refresh) await authApi.logout(refresh).catch(() => {})
-    Cookies.remove('accessToken')
-    Cookies.remove('refreshToken')
+    clearAuthCookies()
     set({ user: null })
   },
 
   fetchMe: async () => {
-    const token = Cookies.get('accessToken')
+    const token = getAccessToken()
     if (!token) return
     try {
       const { data } = await usersApi.getMe()
       set({ user: data.data })
     } catch {
-      Cookies.remove('accessToken')
-      Cookies.remove('refreshToken')
+      clearAuthCookies()
       set({ user: null })
     }
   },
