@@ -13,7 +13,7 @@ const { pool }   = require('./config/database');
 const socketHandler = require('./utils/socketHandler');
 
 // Routes
-const authRoutes        = require('./routes/auth.routes');
+const authRoutes        = require('./routes/auth');
 const userRoutes        = require('./routes/user.routes');
 const listingRoutes     = require('./routes/listing.routes');
 const categoryRoutes    = require('./routes/category.routes');

@@ -57,7 +57,12 @@ export const useAuthStore = create<AuthStore>((set) => ({
       const { user, accessToken, refreshToken } = data.data
       Cookies.set('accessToken', accessToken, { expires: 1 })
       Cookies.set('refreshToken', refreshToken, { expires: 7 })
-      set({ user, loading: false })
+      if (user) {
+        set({ user, loading: false })
+      } else {
+        const me = await usersApi.getMe()
+        set({ user: me.data.data, loading: false })
+      }
     } finally {
       set({ loading: false })
     }

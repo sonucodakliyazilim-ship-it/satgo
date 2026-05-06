@@ -6,6 +6,12 @@ const { query, withTransaction } = require('../config/database');
 // ── Helpers ───────────────────────────────────────────────────
 
 const generateTokens = (userId, role) => {
+  if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET) {
+    const err = new Error('JWT secrets are not configured.');
+    err.status = 500;
+    throw err;
+  }
+
   const accessToken = jwt.sign(
     { userId, role, jti: uuidv4() },
     process.env.JWT_SECRET,
@@ -98,12 +104,9 @@ const login = async (req, res, next) => {
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
     await saveRefreshToken(user.id, refreshToken);
 
-    const { password_hash, ...safeUser } = user;
-
-    res.json({
+    return res.json({
       success: true,
-      message: 'Giriş başarılı.',
-      data: { user: safeUser, accessToken, refreshToken },
+      data: { accessToken, refreshToken },
     });
   } catch (err) {
     next(err);
