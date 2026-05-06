@@ -2,6 +2,11 @@ import axios from 'axios'
 import { API_URL } from './config'
 import { clearAuthCookies, getAccessToken, getRefreshToken, setAuthCookies } from './authCookies'
 
+const shouldClearSession = (error: any) => {
+  const status = error?.response?.status
+  return status === 401 || status === 403
+}
+
 export const api = axios.create({
   baseURL: API_URL,
   timeout: 15000,
@@ -32,8 +37,10 @@ api.interceptors.response.use(
           setAuthCookies(data.data.accessToken, data.data.refreshToken)
           original.headers.Authorization = `Bearer ${data.data.accessToken}`
           return api(original)
-        } catch {
-          clearAuthCookies()
+        } catch (refreshError: any) {
+          if (shouldClearSession(refreshError)) {
+            clearAuthCookies()
+          }
         }
       }
     }

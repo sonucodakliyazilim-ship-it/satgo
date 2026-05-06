@@ -14,6 +14,7 @@ interface User {
 interface AuthStore {
   user: User | null
   loading: boolean
+  authReady: boolean
   selectedCity: string
   selectedDistrict: string
   setUser: (user: User | null) => void
@@ -25,13 +26,40 @@ interface AuthStore {
   fetchMe: () => Promise<void>
 }
 
+const getStoredUser = () => {
+  if (typeof window === 'undefined' || !getAccessToken()) return null
+
+  try {
+    return JSON.parse(localStorage.getItem('authUser') || 'null') as User | null
+  } catch {
+    localStorage.removeItem('authUser')
+    return null
+  }
+}
+
+const persistUser = (user: User | null) => {
+  if (typeof window === 'undefined') return
+
+  if (user) localStorage.setItem('authUser', JSON.stringify(user))
+  else localStorage.removeItem('authUser')
+}
+
+const shouldClearSession = (error: any) => {
+  const status = error?.response?.status
+  return status === 401 || status === 403
+}
+
 export const useAuthStore = create<AuthStore>((set) => ({
-  user: null,
+  user: getStoredUser(),
   loading: false,
+  authReady: typeof window !== 'undefined' && !getAccessToken(),
   selectedCity: typeof window !== 'undefined' ? localStorage.getItem('selectedCity') || '' : '',
   selectedDistrict: typeof window !== 'undefined' ? localStorage.getItem('selectedDistrict') || '' : '',
 
-  setUser: (user) => set({ user }),
+  setUser: (user) => {
+    persistUser(user)
+    set({ user })
+  },
   setSelectedLocation: (city, district = '') => {
     if (typeof window !== 'undefined') {
       if (city) localStorage.setItem('selectedCity', city)
@@ -56,11 +84,13 @@ export const useAuthStore = create<AuthStore>((set) => ({
       const { data } = await authApi.login({ email, password })
       const { user, accessToken, refreshToken } = data.data
       setAuthCookies(accessToken, refreshToken)
+      persistUser(user)
       if (user) {
-        set({ user, loading: false })
+        set({ user, loading: false, authReady: true })
       } else {
         const me = await usersApi.getMe()
-        set({ user: me.data.data, loading: false })
+        persistUser(me.data.data)
+        set({ user: me.data.data, loading: false, authReady: true })
       }
     } finally {
       set({ loading: false })
@@ -77,7 +107,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
       const { data } = await authApi.register(payload)
       const { user, accessToken, refreshToken } = data.data
       setAuthCookies(accessToken, refreshToken)
-      set({ user, loading: false })
+      persistUser(user)
+      set({ user, loading: false, authReady: true })
     } finally {
       set({ loading: false })
     }
@@ -87,18 +118,30 @@ export const useAuthStore = create<AuthStore>((set) => ({
     const refresh = getRefreshToken()
     if (refresh) await authApi.logout(refresh).catch(() => {})
     clearAuthCookies()
-    set({ user: null })
+    persistUser(null)
+    set({ user: null, authReady: true })
   },
 
   fetchMe: async () => {
     const token = getAccessToken()
-    if (!token) return
+    if (!token) {
+      persistUser(null)
+      set({ user: null, authReady: true })
+      return
+    }
+
     try {
       const { data } = await usersApi.getMe()
+      persistUser(data.data)
       set({ user: data.data })
-    } catch {
-      clearAuthCookies()
-      set({ user: null })
+    } catch (error: any) {
+      if (shouldClearSession(error)) {
+        clearAuthCookies()
+        persistUser(null)
+        set({ user: null })
+      }
+    } finally {
+      set({ authReady: true })
     }
   },
 }))

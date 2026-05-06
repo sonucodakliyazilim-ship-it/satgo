@@ -3,19 +3,16 @@
 import './globals.css'
 import { Toaster } from 'react-hot-toast'
 import { useEffect } from 'react'
-import { usePathname } from 'next/navigation'
 import { useAuthStore } from '@/lib/store'
 import Navbar from '@/components/layout/Navbar'
 import BottomNav from '@/components/layout/BottomNav'
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const fetchMe = useAuthStore((s) => s.fetchMe)
-  const pathname = usePathname()
 
   useEffect(() => {
-    if (pathname === '/') return
     fetchMe()
-  }, [fetchMe, pathname])
+  }, [fetchMe])
 
   return (
     <html lang="tr">

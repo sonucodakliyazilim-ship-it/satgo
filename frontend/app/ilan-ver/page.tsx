@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { categoriesApi, listingsApi, uploadApi } from '@/lib/api'
+import { defaultCategories } from '@/lib/defaultCategories'
 import { useAuthStore } from '@/lib/store'
 import cities from '@/lib/cities.json'
 import districts from '@/lib/districts.json'
@@ -70,8 +71,8 @@ const MOTOR_BRANDS: Record<string, string[]> = {
 
 export default function CreateListingPage() {
   const router = useRouter()
-  const { user } = useAuthStore()
-  const [categories, setCategories] = useState<any[]>([])
+  const { user, authReady } = useAuthStore()
+  const [categories, setCategories] = useState<any[]>(defaultCategories)
   const [files, setFiles] = useState<File[]>([])
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
@@ -107,7 +108,10 @@ export default function CreateListingPage() {
   })
 
   useEffect(() => {
-    categoriesApi.getAll().then(({ data }) => setCategories(data.data)).catch(() => setCategories([]))
+    categoriesApi
+      .getAll()
+      .then(({ data }) => setCategories(data.data?.length ? data.data : defaultCategories))
+      .catch(() => setCategories(defaultCategories))
   }, [])
 
   const selectedCategory = categories.find((c) => String(c.id) === form.category_id)
@@ -203,6 +207,14 @@ export default function CreateListingPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  if (!authReady) {
+    return (
+      <div className="max-w-xl mx-auto px-4 py-12">
+        <div className="card p-8 text-center text-gray-500">Oturum kontrol ediliyor...</div>
+      </div>
+    )
   }
 
   if (!user) {
