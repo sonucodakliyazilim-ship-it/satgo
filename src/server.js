@@ -13,7 +13,7 @@ const { pool }   = require('./config/database');
 const socketHandler = require('./utils/socketHandler');
 
 // Routes
-const authRoutes        = require('./routes/auth');
+const authRoutes        = require("./routes/auth");
 const userRoutes        = require('./routes/user.routes');
 const listingRoutes     = require('./routes/listing.routes');
 const categoryRoutes    = require('./routes/category.routes');
@@ -54,7 +54,7 @@ app.use(helmet({
 app.use(cors(corsOptions));
 app.use(compression());
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json());
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Static files (uploaded images)
@@ -71,15 +71,8 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Stricter limit for auth endpoints
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'development' ? 10000 : 10,
-  message: { success: false, message: 'Çok fazla giriş denemesi. 15 dakika bekleyin.' },
-});
-
 // ── Routes ────────────────────────────────────────────────────
-app.use('/api/auth',       authLimiter, authRoutes);
+app.use("/api/auth", authRoutes);
 app.use('/api/users',      userRoutes);
 app.use('/api/listings',   listingRoutes);
 app.use('/api/categories', categoryRoutes);
