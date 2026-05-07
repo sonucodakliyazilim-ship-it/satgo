@@ -181,8 +181,8 @@ const createListing = async (req, res, next) => {
       const { rows } = await client.query(
         `INSERT INTO listings
           (user_id, category_id, sub_category_id, title, description, price,
-           price_negotiable, condition, city, district, neighborhood, latitude, longitude, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending')
+           price_negotiable, condition, city, district, neighborhood, latitude, longitude, status, approved_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'active',NOW())
          RETURNING *`,
         [
           req.user.id, category_id, sub_category_id || null,
