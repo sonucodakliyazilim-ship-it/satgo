@@ -46,8 +46,9 @@ router.post(
   '/refresh',
   [
     body('refreshToken')
-      .notEmpty()
-      .withMessage('Refresh token gerekli.'),
+      .optional({ checkFalsy: true })
+      .isString()
+      .withMessage('Refresh token geçerli olmalı.'),
   ],
   validate,
   ctrl.refresh,

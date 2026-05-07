@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const authRoutes = require('./auth.routes');
 const { query } = require('../config/database');
+const { setTokenCookies } = require('../utils/tokenCookies');
 
 router.post("/login", async (req, res, next) => {
   try {
@@ -38,6 +39,7 @@ router.post("/login", async (req, res, next) => {
       'INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
       [user.id, refreshToken, refreshExpiresAt]
     );
+    setTokenCookies(res, token, refreshToken);
 
     return res.json({
       success: true,
@@ -45,7 +47,9 @@ router.post("/login", async (req, res, next) => {
         user: {
           id: user.id,
           email: user.email,
-          name: user.name
+          name: user.name,
+          role: user.role,
+          avatar_url: user.avatar_url
         },
         accessToken: token,
         refreshToken

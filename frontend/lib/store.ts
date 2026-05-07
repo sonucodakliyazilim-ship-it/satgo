@@ -49,10 +49,20 @@ const shouldClearSession = (error: any) => {
   return status === 401
 }
 
+const getAuthData = (data: any) => data?.data || data || {}
+const getAuthTokens = (data: any) => {
+  const authData = getAuthData(data)
+  return {
+    accessToken: authData.accessToken || authData.token || authData.access_token,
+    refreshToken: authData.refreshToken || authData.refresh_token,
+    user: authData.user,
+  }
+}
+
 export const useAuthStore = create<AuthStore>((set) => ({
   user: getStoredUser(),
   loading: false,
-  authReady: typeof window !== 'undefined' && !hasAuthTokens(),
+  authReady: false,
   selectedCity: typeof window !== 'undefined' ? localStorage.getItem('selectedCity') || '' : '',
   selectedDistrict: typeof window !== 'undefined' ? localStorage.getItem('selectedDistrict') || '' : '',
 
@@ -82,10 +92,10 @@ export const useAuthStore = create<AuthStore>((set) => ({
     set({ loading: true })
     try {
       const { data } = await authApi.login({ email, password })
-      const { user, accessToken, refreshToken } = data.data
-      setAuthCookies(accessToken, refreshToken)
-      persistUser(user)
+      const { user, accessToken, refreshToken } = getAuthTokens(data)
+      if (accessToken) setAuthCookies(accessToken, refreshToken)
       if (user) {
+        persistUser(user)
         set({ user, loading: false, authReady: true })
       } else {
         const me = await usersApi.getMe()
@@ -105,10 +115,11 @@ export const useAuthStore = create<AuthStore>((set) => ({
         phone: formData.phone?.trim() || undefined,
       }
       const { data } = await authApi.register(payload)
-      const { user, accessToken, refreshToken } = data.data
-      setAuthCookies(accessToken, refreshToken)
-      persistUser(user)
-      set({ user, loading: false, authReady: true })
+      const { user, accessToken, refreshToken } = getAuthTokens(data)
+      if (accessToken) setAuthCookies(accessToken, refreshToken)
+      const currentUser = user || (await usersApi.getMe()).data.data
+      persistUser(currentUser)
+      set({ user: currentUser, loading: false, authReady: true })
     } finally {
       set({ loading: false })
     }
@@ -116,19 +127,14 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
   logout: async () => {
     const refresh = getRefreshToken()
-    if (refresh) await authApi.logout(refresh).catch(() => {})
+    await authApi.logout(refresh).catch(() => {})
     clearAuthCookies()
     persistUser(null)
     set({ user: null, authReady: true })
   },
 
   fetchMe: async () => {
-    const token = await ensureAccessToken()
-    if (!token) {
-      persistUser(null)
-      set({ user: null, authReady: true })
-      return
-    }
+    await ensureAccessToken()
 
     try {
       const { data } = await usersApi.getMe()

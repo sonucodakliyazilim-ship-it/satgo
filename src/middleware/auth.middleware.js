@@ -1,15 +1,15 @@
 const jwt  = require('jsonwebtoken');
 const { query } = require('../config/database');
+const { getAccessTokenFromRequest } = require('../utils/tokenCookies');
 
 // Verify access token
 const authenticate = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const token = getAccessTokenFromRequest(req);
+    if (!token) {
       return res.status(401).json({ success: false, message: 'Kimlik doğrulama gerekli.' });
     }
 
-    const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     // Fetch fresh user data
@@ -40,12 +40,11 @@ const authenticate = async (req, res, next) => {
 // Optional auth - doesn't fail if no token, just sets req.user = null
 const optionalAuth = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const token = getAccessTokenFromRequest(req);
+    if (!token) {
       req.user = null;
       return next();
     }
-    const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const { rows } = await query(
       'SELECT id, name, email, role, status, avatar_url FROM users WHERE id = $1',

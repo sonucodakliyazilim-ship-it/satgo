@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { categoriesApi, ensureAccessToken, listingsApi, uploadApi } from '@/lib/api'
+import { categoriesApi, listingsApi, uploadApi } from '@/lib/api'
 import { defaultCategories } from '@/lib/defaultCategories'
 import { useAuthStore } from '@/lib/store'
 import cities from '@/lib/cities.json'
@@ -146,14 +146,6 @@ export default function CreateListingPage() {
     if (!user) return router.push('/giris')
     setSaving(true)
     try {
-      const token = await ensureAccessToken()
-      if (!token) {
-        setUser(null)
-        toast.error('Oturum süresi doldu. Lütfen tekrar giriş yap.')
-        router.push('/giris')
-        return
-      }
-
       const payload: any = {
         category_id: Number(form.category_id),
         sub_category_id: form.sub_category_id ? Number(form.sub_category_id) : undefined,

@@ -46,12 +46,11 @@ let refreshPromise: Promise<string | null> | null = null
 
 const requestFreshAccessToken = async () => {
   const refreshToken = getRefreshToken()
-  if (!refreshToken) return null
 
   try {
     const { data } = await axios.post(
       `${API_URL}/auth/refresh`,
-      { refreshToken },
+      refreshToken ? { refreshToken } : {},
       { withCredentials: true },
     )
     const accessToken = data?.data?.accessToken
@@ -133,7 +132,7 @@ api.interceptors.response.use(
 export const authApi = {
   register: (d: any) => api.post('/auth/register', d),
   login: (d: any) => api.post('/auth/login', d),
-  logout: (refreshToken: string) => api.post('/auth/logout', { refreshToken }),
+  logout: (refreshToken?: string) => api.post('/auth/logout', refreshToken ? { refreshToken } : {}),
   refresh: (refreshToken: string) => api.post('/auth/refresh', { refreshToken }),
   forgotPassword: (email: string) => api.post('/auth/forgot-password', { email }),
   resetPassword: (token: string, password: string) => api.post('/auth/reset-password', { token, password }),

@@ -2,6 +2,7 @@ const bcrypt  = require('bcryptjs');
 const jwt     = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { query, withTransaction } = require('../config/database');
+const { clearTokenCookies, getRefreshTokenFromRequest, setTokenCookies } = require('../utils/tokenCookies');
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ const register = async (req, res, next) => {
     const user = rows[0];
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
     await saveRefreshToken(user.id, refreshToken);
+    setTokenCookies(res, accessToken, refreshToken);
 
     // TODO: send verification email here
 
@@ -100,10 +102,12 @@ const login = async (req, res, next) => {
 
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
     await saveRefreshToken(user.id, refreshToken);
+    setTokenCookies(res, accessToken, refreshToken);
+    delete user.password_hash;
 
     return res.json({
       success: true,
-      data: { accessToken, refreshToken },
+      data: { user, accessToken, refreshToken },
     });
   } catch (err) {
     next(err);
@@ -113,7 +117,7 @@ const login = async (req, res, next) => {
 // POST /api/auth/refresh
 const refresh = async (req, res, next) => {
   try {
-    const { refreshToken } = req.body;
+    const refreshToken = getRefreshTokenFromRequest(req);
     if (!refreshToken) {
       return res.status(400).json({ success: false, message: 'Refresh token gerekli.' });
     }
@@ -139,6 +143,7 @@ const refresh = async (req, res, next) => {
     await query('DELETE FROM refresh_tokens WHERE token = $1', [refreshToken]);
     const { accessToken, refreshToken: newRefresh } = generateTokens(decoded.userId, decoded.role);
     await saveRefreshToken(decoded.userId, newRefresh);
+    setTokenCookies(res, accessToken, newRefresh);
 
     res.json({
       success: true,
@@ -152,10 +157,11 @@ const refresh = async (req, res, next) => {
 // POST /api/auth/logout
 const logout = async (req, res, next) => {
   try {
-    const { refreshToken } = req.body;
+    const refreshToken = getRefreshTokenFromRequest(req);
     if (refreshToken) {
       await query('DELETE FROM refresh_tokens WHERE token = $1', [refreshToken]);
     }
+    clearTokenCookies(res);
     res.json({ success: true, message: 'Çıkış yapıldı.' });
   } catch (err) {
     next(err);
