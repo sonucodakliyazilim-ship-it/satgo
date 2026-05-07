@@ -3,6 +3,7 @@ const jwt     = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { query, withTransaction } = require('../config/database');
 const { clearTokenCookies, getRefreshTokenFromRequest, setTokenCookies } = require('../utils/tokenCookies');
+const { saveAccessToken } = require('../utils/tokenStore');
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ const register = async (req, res, next) => {
 
     const user = rows[0];
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
+    await saveAccessToken(user.id, accessToken);
     await saveRefreshToken(user.id, refreshToken);
     setTokenCookies(res, accessToken, refreshToken);
 
@@ -101,6 +103,7 @@ const login = async (req, res, next) => {
     }
 
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
+    await saveAccessToken(user.id, accessToken);
     await saveRefreshToken(user.id, refreshToken);
     setTokenCookies(res, accessToken, refreshToken);
     delete user.password_hash;
@@ -142,6 +145,7 @@ const refresh = async (req, res, next) => {
     // Rotate: delete old, issue new
     await query('DELETE FROM refresh_tokens WHERE token = $1', [refreshToken]);
     const { accessToken, refreshToken: newRefresh } = generateTokens(decoded.userId, decoded.role);
+    await saveAccessToken(decoded.userId, accessToken);
     await saveRefreshToken(decoded.userId, newRefresh);
     setTokenCookies(res, accessToken, newRefresh);
 

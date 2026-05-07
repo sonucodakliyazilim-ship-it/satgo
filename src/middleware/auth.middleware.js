@@ -1,6 +1,27 @@
 const jwt  = require('jsonwebtoken');
 const { query } = require('../config/database');
 const { getAccessTokenFromRequest } = require('../utils/tokenCookies');
+const { findIssuedAccessToken } = require('../utils/tokenStore');
+
+const verifyAccessToken = async (token) => {
+  try {
+    return jwt.verify(token, process.env.JWT_SECRET);
+  } catch (err) {
+    if (err.name === 'TokenExpiredError') throw err;
+
+    const decoded = jwt.decode(token);
+    if (!decoded?.userId) throw err;
+    if (decoded.exp && decoded.exp * 1000 <= Date.now()) {
+      const expiredErr = new Error('Token expired');
+      expiredErr.name = 'TokenExpiredError';
+      throw expiredErr;
+    }
+
+    const issued = await findIssuedAccessToken(token);
+    if (!issued || issued.user_id !== decoded.userId) throw err;
+    return decoded;
+  }
+};
 
 // Verify access token
 const authenticate = async (req, res, next) => {
@@ -10,7 +31,7 @@ const authenticate = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Kimlik doğrulama gerekli.' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = await verifyAccessToken(token);
 
     // Fetch fresh user data
     const { rows } = await query(
@@ -45,7 +66,7 @@ const optionalAuth = async (req, res, next) => {
       req.user = null;
       return next();
     }
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = await verifyAccessToken(token);
     const { rows } = await query(
       'SELECT id, name, email, role, status, avatar_url FROM users WHERE id = $1',
       [decoded.userId]

@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const authRoutes = require('./auth.routes');
 const { query } = require('../config/database');
 const { setTokenCookies } = require('../utils/tokenCookies');
+const { saveAccessToken } = require('../utils/tokenStore');
 
 router.post("/login", async (req, res, next) => {
   try {
@@ -35,6 +36,7 @@ router.post("/login", async (req, res, next) => {
     );
     const refreshExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
+    await saveAccessToken(user.id, token);
     await query(
       'INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
       [user.id, refreshToken, refreshExpiresAt]
