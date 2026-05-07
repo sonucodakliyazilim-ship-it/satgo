@@ -48,6 +48,8 @@ module.exports = async (req, res, next) => {
     req.user = user;
     next();
   } catch (err) {
+    res.set('X-Satgo-Auth-Error', String(err.message || err.name || 'unknown').slice(0, 120));
+
     if (err.name === 'TokenExpiredError') {
       return res.status(401).json({ success: false, message: 'Oturum süresi doldu.', code: 'TOKEN_EXPIRED' });
     }
