@@ -46,10 +46,7 @@ let refreshPromise: Promise<string | null> | null = null
 
 const requestFreshAccessToken = async () => {
   const refreshToken = getRefreshToken()
-  if (!refreshToken) {
-    clearAuthCookies()
-    return null
-  }
+  if (!refreshToken) return null
 
   try {
     const { data } = await axios.post(
@@ -58,10 +55,7 @@ const requestFreshAccessToken = async () => {
       { withCredentials: true },
     )
     const accessToken = data?.data?.accessToken
-    if (!accessToken) {
-      clearAuthCookies()
-      return null
-    }
+    if (!accessToken) return null
 
     setAuthCookies(accessToken, data?.data?.refreshToken)
     return accessToken as string
@@ -86,7 +80,9 @@ export const refreshAccessToken = async () => {
 export const ensureAccessToken = async () => {
   const token = getAccessToken()
   if (token && !isTokenExpiringSoon(token)) return token
-  return refreshAccessToken()
+
+  const refreshedToken = await refreshAccessToken()
+  return refreshedToken || token || null
 }
 
 export const api = axios.create({
