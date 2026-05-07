@@ -80,7 +80,7 @@ const login = async (req, res, next) => {
     const { email, password } = req.body;
 
     const { rows } = await query(
-      'SELECT id, name, email, password_hash, role, status, avatar_url FROM users WHERE email = $1',
+      'SELECT * FROM users WHERE email = $1',
       [email]
     );
 

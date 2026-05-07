@@ -72,7 +72,7 @@ const getListings = async (req, res, next) => {
     const listingsQ = await query(
       `SELECT l.*,
               c.name  AS category_name, c.slug AS category_slug, c.icon AS category_icon,
-              u.name  AS seller_name, u.avatar_url AS seller_avatar, u.rating_avg AS seller_rating,
+              u.name  AS seller_name, NULL AS seller_avatar, u.rating_avg AS seller_rating,
               (SELECT url FROM listing_images WHERE listing_id = l.id AND is_primary = TRUE LIMIT 1) AS primary_image
        FROM listings l
        JOIN categories c ON c.id = l.category_id
@@ -110,7 +110,7 @@ const getListing = async (req, res, next) => {
       `SELECT l.*,
               c.name  AS category_name, c.slug AS category_slug, c.icon AS category_icon,
               sc.name AS sub_category_name,
-              u.name  AS seller_name, u.avatar_url AS seller_avatar,
+              u.name  AS seller_name, NULL AS seller_avatar,
               u.rating_avg AS seller_rating, u.rating_count AS seller_rating_count,
               u.listing_count AS seller_listing_count, u.city AS seller_city,
               u.phone AS seller_phone, u.created_at AS seller_member_since

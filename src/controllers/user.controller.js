@@ -4,28 +4,52 @@ const { query } = require('../config/database');
 // GET /api/users/me
 const getMe = async (req, res, next) => {
   try {
-    const { rows } = await query(
-      `SELECT id, name, email, phone, avatar_url, bio, city, district,
-              role, status, email_verified, phone_verified,
-              rating_avg, rating_count, listing_count, created_at
-       FROM users WHERE id = $1`,
-      [req.user.id]
-    );
-    res.json({ success: true, data: rows[0] });
+    const { rows } = await query('SELECT * FROM users WHERE id = $1', [req.user.id]);
+    const user = rows[0] || {};
+    res.json({
+      success: true,
+      data: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone || null,
+        avatar_url: user.avatar_url || null,
+        bio: user.bio || null,
+        city: user.city || null,
+        district: user.district || null,
+        role: user.role || 'user',
+        status: user.status || 'active',
+        email_verified: user.email_verified || false,
+        phone_verified: user.phone_verified || false,
+        rating_avg: user.rating_avg || 0,
+        rating_count: user.rating_count || 0,
+        listing_count: user.listing_count || 0,
+        created_at: user.created_at,
+      },
+    });
   } catch (err) { next(err); }
 };
 
 // GET /api/users/:id  — public profile
 const getUser = async (req, res, next) => {
   try {
-    const { rows } = await query(
-      `SELECT id, name, avatar_url, bio, city, rating_avg, rating_count,
-              listing_count, created_at
-       FROM users WHERE id = $1 AND status = 'active'`,
-      [req.params.id]
-    );
+    const { rows } = await query('SELECT * FROM users WHERE id = $1 AND status = $2', [req.params.id, 'active']);
     if (!rows.length) return res.status(404).json({ success: false, message: 'Kullanıcı bulunamadı.' });
-    res.json({ success: true, data: rows[0] });
+    const user = rows[0];
+    res.json({
+      success: true,
+      data: {
+        id: user.id,
+        name: user.name,
+        avatar_url: user.avatar_url || null,
+        bio: user.bio || null,
+        city: user.city || null,
+        rating_avg: user.rating_avg || 0,
+        rating_count: user.rating_count || 0,
+        listing_count: user.listing_count || 0,
+        created_at: user.created_at,
+      },
+    });
   } catch (err) { next(err); }
 };
 

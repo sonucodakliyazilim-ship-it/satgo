@@ -8,7 +8,7 @@ const getConversations = async (req, res, next) => {
               l.title AS listing_title, l.price AS listing_price, l.status AS listing_status,
               (SELECT url FROM listing_images WHERE listing_id = l.id AND is_primary = TRUE LIMIT 1) AS listing_image,
               CASE WHEN conv.buyer_id = $1 THEN u_s.name ELSE u_b.name END AS other_name,
-              CASE WHEN conv.buyer_id = $1 THEN u_s.avatar_url ELSE u_b.avatar_url END AS other_avatar,
+              NULL AS other_avatar,
               CASE WHEN conv.buyer_id = $1 THEN conv.buyer_unread ELSE conv.seller_unread END AS unread_count
        FROM conversations conv
        JOIN listings l ON l.id = conv.listing_id
@@ -51,7 +51,7 @@ const getMessages = async (req, res, next) => {
     );
 
     const { rows } = await query(
-      `SELECT m.*, u.name AS sender_name, u.avatar_url AS sender_avatar
+      `SELECT m.*, u.name AS sender_name, NULL AS sender_avatar
        FROM messages m
        JOIN users u ON u.id = m.sender_id
        WHERE m.conversation_id = $1 AND m.is_deleted = FALSE

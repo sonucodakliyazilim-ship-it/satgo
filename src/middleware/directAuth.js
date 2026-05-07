@@ -32,7 +32,7 @@ module.exports = async (req, res, next) => {
 
     const decoded = await verifyToken(token);
     const { rows } = await query(
-      'SELECT id, name, email, role, status, avatar_url FROM users WHERE id = $1',
+      'SELECT * FROM users WHERE id = $1',
       [decoded.userId]
     );
 
