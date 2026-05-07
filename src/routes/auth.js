@@ -6,6 +6,7 @@ const authRoutes = require('./auth.routes');
 const { query } = require('../config/database');
 const { setTokenCookies } = require('../utils/tokenCookies');
 const { saveAccessToken } = require('../utils/tokenStore');
+const { getAccessTokenSecret, getRefreshTokenSecret } = require('../utils/jwtSecrets');
 
 router.post("/login", async (req, res, next) => {
   try {
@@ -26,12 +27,12 @@ router.post("/login", async (req, res, next) => {
 
     const token = jwt.sign(
       { userId: user.id, role: user.role, jti: uuidv4() },
-      process.env.JWT_SECRET,
+      getAccessTokenSecret(),
       { expiresIn: "1h" }
     );
     const refreshToken = jwt.sign(
       { userId: user.id, role: user.role, jti: uuidv4() },
-      process.env.JWT_REFRESH_SECRET,
+      getRefreshTokenSecret(),
       { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d" }
     );
     const refreshExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);

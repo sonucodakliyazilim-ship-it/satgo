@@ -2,10 +2,11 @@ const jwt  = require('jsonwebtoken');
 const { query } = require('../config/database');
 const { getAccessTokenFromRequest } = require('../utils/tokenCookies');
 const { findIssuedAccessToken } = require('../utils/tokenStore');
+const { getAccessTokenSecret } = require('../utils/jwtSecrets');
 
 const verifyAccessToken = async (token) => {
   try {
-    return jwt.verify(token, process.env.JWT_SECRET);
+    return jwt.verify(token, getAccessTokenSecret());
   } catch (err) {
     if (err.name === 'TokenExpiredError') throw err;
 

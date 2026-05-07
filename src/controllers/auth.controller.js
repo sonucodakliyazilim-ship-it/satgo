@@ -4,24 +4,21 @@ const { v4: uuidv4 } = require('uuid');
 const { query, withTransaction } = require('../config/database');
 const { clearTokenCookies, getRefreshTokenFromRequest, setTokenCookies } = require('../utils/tokenCookies');
 const { saveAccessToken } = require('../utils/tokenStore');
+const { assertJwtSecrets, getAccessTokenSecret, getRefreshTokenSecret } = require('../utils/jwtSecrets');
 
 // ── Helpers ───────────────────────────────────────────────────
 
 const generateTokens = (userId, role) => {
-  if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET) {
-    const err = new Error('JWT secrets are not configured.');
-    err.status = 500;
-    throw err;
-  }
+  assertJwtSecrets();
 
   const accessToken = jwt.sign(
     { userId, role, jti: uuidv4() },
-    process.env.JWT_SECRET,
+    getAccessTokenSecret(),
     { expiresIn: process.env.JWT_EXPIRES_IN || '15m' }
   );
   const refreshToken = jwt.sign(
     { userId, role, jti: uuidv4() },
-    process.env.JWT_REFRESH_SECRET,
+    getRefreshTokenSecret(),
     { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' }
   );
   return { accessToken, refreshToken };
@@ -128,7 +125,7 @@ const refresh = async (req, res, next) => {
     // Verify token signature
     let decoded;
     try {
-      decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+      decoded = jwt.verify(refreshToken, getRefreshTokenSecret());
     } catch {
       return res.status(401).json({ success: false, message: 'Geçersiz refresh token.' });
     }

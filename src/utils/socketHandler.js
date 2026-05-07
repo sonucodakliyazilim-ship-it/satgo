@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { getAccessTokenSecret } = require('./jwtSecrets');
 
 module.exports = (io) => {
   // Auth middleware for socket connections
@@ -6,7 +7,7 @@ module.exports = (io) => {
     const token = socket.handshake.auth?.token;
     if (!token) return next(new Error('Authentication required'));
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jwt.verify(token, getAccessTokenSecret());
       socket.userId = decoded.userId;
       next();
     } catch {
