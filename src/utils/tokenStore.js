@@ -6,8 +6,7 @@ const saveAccessToken = async (userId, token) => {
   const expiresAt = new Date(Date.now() + ACCESS_TOKEN_MAX_AGE_MS);
   await query(
     `INSERT INTO refresh_tokens (user_id, token, expires_at)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (token) DO NOTHING`,
+     VALUES ($1, $2, $3)`,
     [userId, token, expiresAt]
   );
 };
