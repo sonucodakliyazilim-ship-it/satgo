@@ -2,7 +2,6 @@ const jwt = require('jsonwebtoken');
 const { query } = require('../config/database');
 const { getAccessTokenFromRequest } = require('../utils/tokenCookies');
 const { getAccessTokenSecret } = require('../utils/jwtSecrets');
-const { findIssuedAccessToken } = require('../utils/tokenStore');
 
 const verifyToken = async (token) => {
   try {
@@ -18,8 +17,6 @@ const verifyToken = async (token) => {
       throw expiredErr;
     }
 
-    const issued = await findIssuedAccessToken(token);
-    if (!issued || issued.user_id !== decoded.userId) throw err;
     return decoded;
   }
 };
