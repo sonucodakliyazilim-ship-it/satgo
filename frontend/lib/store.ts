@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { authApi, usersApi } from '@/lib/api'
-import { clearAuthCookies, getAccessToken, getRefreshToken, setAuthCookies } from '@/lib/authCookies'
+import { authApi, ensureAccessToken, usersApi } from '@/lib/api'
+import { clearAuthCookies, getRefreshToken, hasAuthTokens, setAuthCookies } from '@/lib/authCookies'
 
 interface User {
   id: string
@@ -27,7 +27,7 @@ interface AuthStore {
 }
 
 const getStoredUser = () => {
-  if (typeof window === 'undefined' || !getAccessToken()) return null
+  if (typeof window === 'undefined' || !hasAuthTokens()) return null
 
   try {
     return JSON.parse(localStorage.getItem('authUser') || 'null') as User | null
@@ -46,13 +46,13 @@ const persistUser = (user: User | null) => {
 
 const shouldClearSession = (error: any) => {
   const status = error?.response?.status
-  return status === 401 || status === 403
+  return status === 401
 }
 
 export const useAuthStore = create<AuthStore>((set) => ({
   user: getStoredUser(),
   loading: false,
-  authReady: typeof window !== 'undefined' && !getAccessToken(),
+  authReady: typeof window !== 'undefined' && !hasAuthTokens(),
   selectedCity: typeof window !== 'undefined' ? localStorage.getItem('selectedCity') || '' : '',
   selectedDistrict: typeof window !== 'undefined' ? localStorage.getItem('selectedDistrict') || '' : '',
 
@@ -123,7 +123,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
   },
 
   fetchMe: async () => {
-    const token = getAccessToken()
+    const token = await ensureAccessToken()
     if (!token) {
       persistUser(null)
       set({ user: null, authReady: true })

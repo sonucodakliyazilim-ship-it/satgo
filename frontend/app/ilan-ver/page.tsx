@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { categoriesApi, listingsApi, uploadApi } from '@/lib/api'
+import { categoriesApi, ensureAccessToken, listingsApi, uploadApi } from '@/lib/api'
 import { defaultCategories } from '@/lib/defaultCategories'
 import { useAuthStore } from '@/lib/store'
 import cities from '@/lib/cities.json'
@@ -71,7 +71,7 @@ const MOTOR_BRANDS: Record<string, string[]> = {
 
 export default function CreateListingPage() {
   const router = useRouter()
-  const { user, authReady } = useAuthStore()
+  const { user, authReady, setUser } = useAuthStore()
   const [categories, setCategories] = useState<any[]>(defaultCategories)
   const [files, setFiles] = useState<File[]>([])
   const [saving, setSaving] = useState(false)
@@ -146,6 +146,14 @@ export default function CreateListingPage() {
     if (!user) return router.push('/giris')
     setSaving(true)
     try {
+      const token = await ensureAccessToken()
+      if (!token) {
+        setUser(null)
+        toast.error('Oturum süresi doldu. Lütfen tekrar giriş yap.')
+        router.push('/giris')
+        return
+      }
+
       const payload: any = {
         category_id: Number(form.category_id),
         sub_category_id: form.sub_category_id ? Number(form.sub_category_id) : undefined,
@@ -203,6 +211,13 @@ export default function CreateListingPage() {
       toast.success('İlan oluşturuldu')
       router.push(`/ilan/${data.data.id}`)
     } catch (err: any) {
+      if (err?.response?.status === 401) {
+        setUser(null)
+        toast.error('Oturum süresi doldu. Lütfen tekrar giriş yap.')
+        router.push('/giris')
+        return
+      }
+
       toast.error(err?.response?.data?.errors?.[0]?.message || err?.response?.data?.message || 'İlan oluşturulamadı')
     } finally {
       setSaving(false)

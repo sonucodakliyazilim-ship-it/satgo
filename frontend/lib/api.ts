@@ -2,9 +2,91 @@ import axios from 'axios'
 import { API_URL } from './config'
 import { clearAuthCookies, getAccessToken, getRefreshToken, setAuthCookies } from './authCookies'
 
+const TOKEN_REFRESH_BUFFER_MS = 30 * 1000
+
 const shouldClearSession = (error: any) => {
   const status = error?.response?.status
-  return status === 401 || status === 403
+  return status === 401
+}
+
+const isPublicAuthPath = (url = '') => {
+  const publicAuthPaths = [
+    '/auth/login',
+    '/auth/register',
+    '/auth/refresh',
+    '/auth/logout',
+    '/auth/forgot-password',
+    '/auth/reset-password',
+  ]
+  return publicAuthPaths.some((path) => url.includes(path))
+}
+
+const decodeJwtPayload = (token?: string) => {
+  if (!token || typeof window === 'undefined') return null
+
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return null
+
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=')
+    return JSON.parse(window.atob(padded))
+  } catch {
+    return null
+  }
+}
+
+const isTokenExpiringSoon = (token?: string) => {
+  const payload = decodeJwtPayload(token)
+  if (!payload?.exp) return true
+  return payload.exp * 1000 <= Date.now() + TOKEN_REFRESH_BUFFER_MS
+}
+
+let refreshPromise: Promise<string | null> | null = null
+
+const requestFreshAccessToken = async () => {
+  const refreshToken = getRefreshToken()
+  if (!refreshToken) {
+    clearAuthCookies()
+    return null
+  }
+
+  try {
+    const { data } = await axios.post(
+      `${API_URL}/auth/refresh`,
+      { refreshToken },
+      { withCredentials: true },
+    )
+    const accessToken = data?.data?.accessToken
+    if (!accessToken) {
+      clearAuthCookies()
+      return null
+    }
+
+    setAuthCookies(accessToken, data?.data?.refreshToken)
+    return accessToken as string
+  } catch (error: any) {
+    if (shouldClearSession(error)) {
+      clearAuthCookies()
+    }
+    return null
+  }
+}
+
+export const refreshAccessToken = async () => {
+  if (!refreshPromise) {
+    refreshPromise = requestFreshAccessToken().finally(() => {
+      refreshPromise = null
+    })
+  }
+
+  return refreshPromise
+}
+
+export const ensureAccessToken = async () => {
+  const token = getAccessToken()
+  if (token && !isTokenExpiringSoon(token)) return token
+  return refreshAccessToken()
 }
 
 export const api = axios.create({
@@ -14,35 +96,39 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-api.interceptors.request.use((config) => {
-  const token = getAccessToken()
-  if (token) config.headers.Authorization = `Bearer ${token}`
+api.interceptors.request.use(async (config) => {
+  const url = config.url || ''
+
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    const headers: any = config.headers
+    if (typeof headers?.delete === 'function') headers.delete('Content-Type')
+    else if (headers) delete headers['Content-Type']
+  }
+
+  if (isPublicAuthPath(url)) return config
+
+  const token = await ensureAccessToken()
+  if (token) {
+    config.headers = config.headers || {}
+    config.headers.Authorization = `Bearer ${token}`
+  }
+
   return config
 })
 
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
-    const original = error.config
-    if (error.response?.status === 401 && !original._retry) {
+    const original = error.config as any
+    if (error.response?.status === 401 && original && !original._retry && !isPublicAuthPath(original.url || '')) {
       original._retry = true
-      const refresh = getRefreshToken()
-      if (refresh) {
-        try {
-          const { data } = await axios.post(
-            `${API_URL}/auth/refresh`,
-            { refreshToken: refresh },
-            { withCredentials: true },
-          )
-          setAuthCookies(data.data.accessToken, data.data.refreshToken)
-          original.headers.Authorization = `Bearer ${data.data.accessToken}`
-          return api(original)
-        } catch (refreshError: any) {
-          if (shouldClearSession(refreshError)) {
-            clearAuthCookies()
-          }
-        }
+      const token = await refreshAccessToken()
+      if (token) {
+        original.headers = original.headers || {}
+        original.headers.Authorization = `Bearer ${token}`
+        return api(original)
       }
+      clearAuthCookies()
     }
     return Promise.reject(error)
   },
@@ -123,9 +209,7 @@ export const promotionsApi = {
 
 export const uploadApi = {
   uploadImages: (listingId: string, files: FormData) =>
-    api.post(`/upload/listing-images/${listingId}`, files, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }),
+    api.post(`/upload/listing-images/${listingId}`, files),
   deleteImage: (imageId: string) => api.delete(`/upload/listing-images/${imageId}`),
   setPrimary: (imageId: string) => api.patch(`/upload/listing-images/${imageId}/primary`),
 }
