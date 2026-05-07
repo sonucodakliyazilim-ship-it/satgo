@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { CheckCircle2, ImagePlus, Landmark, Pencil, RefreshCw, Save, Trash2, XCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { adminApi } from '@/lib/api'
-import { API_BASE_URL } from '@/lib/config'
+import { adminApi, categoriesApi } from '@/lib/api'
+import { mediaUrl } from '@/lib/media'
 import { useAuthStore } from '@/lib/store'
 
 const LISTING_STATUSES = [
@@ -26,7 +26,6 @@ const ORDER_STATUSES = [
 const money = (value: number | string) =>
   Number(value || 0).toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })
 
-const API = API_BASE_URL
 const emptyBannerForm = {
   title: '',
   subtitle: '',
@@ -42,6 +41,27 @@ const emptyPaymentForm = {
   iban_owner: '',
 }
 
+const emptyCategoryForm = {
+  parent_id: '',
+  name: '',
+  slug: '',
+  icon: '',
+  sort_order: '0',
+}
+
+const slugify = (value: string) =>
+  value
+    .trim()
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
 export default function AdminPage() {
   const router = useRouter()
   const { user } = useAuthStore()
@@ -50,6 +70,7 @@ export default function AdminPage() {
   const [listings, setListings] = useState<any[]>([])
   const [orders, setOrders] = useState<any[]>([])
   const [banners, setBanners] = useState<any[]>([])
+  const [categories, setCategories] = useState<any[]>([])
   const [paymentSettings, setPaymentSettings] = useState<any>(null)
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm)
   const [status, setStatus] = useState('')
@@ -60,25 +81,30 @@ export default function AdminPage() {
   const [bannerForm, setBannerForm] = useState(emptyBannerForm)
   const [bannerFile, setBannerFile] = useState<File | null>(null)
   const [editingBannerId, setEditingBannerId] = useState<string | null>(null)
+  const [categoryForm, setCategoryForm] = useState(emptyCategoryForm)
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
   const [savingBanner, setSavingBanner] = useState(false)
   const [savingPayment, setSavingPayment] = useState(false)
+  const [savingCategory, setSavingCategory] = useState(false)
 
   const load = async () => {
     setLoading(true)
     try {
-      const [d, u, l, o, b, p] = await Promise.all([
+      const [d, u, l, o, b, p, c] = await Promise.all([
         adminApi.dashboard(),
         adminApi.users(),
         adminApi.listings(status ? { status } : undefined),
         adminApi.promotionOrders(orderStatus ? { status: orderStatus } : undefined),
         adminApi.banners(),
         adminApi.paymentSettings(),
+        categoriesApi.getAll(),
       ])
       setDashboard(d.data.data)
       setUsers(u.data.data)
       setListings(l.data.data)
       setOrders(o.data.data)
       setBanners(b.data.data)
+      setCategories(c.data.data || [])
       setPaymentSettings(p.data.data)
       setPaymentForm({
         bank_name: p.data.data?.bank_name || '',
@@ -237,6 +263,77 @@ export default function AdminPage() {
     }
   }
 
+  const setCategory = (key: keyof typeof emptyCategoryForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const value = e.target.value
+    setCategoryForm((current) => ({
+      ...current,
+      [key]: value,
+      ...(key === 'name' && !editingCategoryId ? { slug: slugify(value) } : {}),
+    }))
+  }
+
+  const resetCategoryForm = () => {
+    setCategoryForm(emptyCategoryForm)
+    setEditingCategoryId(null)
+  }
+
+  const editCategory = (category: any) => {
+    setEditingCategoryId(category.id)
+    setCategoryForm({
+      parent_id: category.parent_id ? String(category.parent_id) : '',
+      name: category.name || '',
+      slug: category.slug || '',
+      icon: category.icon || '',
+      sort_order: String(category.sort_order ?? 0),
+    })
+  }
+
+  const saveCategory = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSavingCategory(true)
+    try {
+      const payload = {
+        parent_id: categoryForm.parent_id || null,
+        name: categoryForm.name,
+        slug: slugify(categoryForm.slug || categoryForm.name),
+        icon: categoryForm.icon || null,
+        sort_order: Number(categoryForm.sort_order || 0),
+      }
+
+      if (editingCategoryId) await categoriesApi.update(editingCategoryId, payload)
+      else await categoriesApi.create(payload)
+
+      toast.success(editingCategoryId ? 'Kategori güncellendi' : 'Kategori eklendi')
+      resetCategoryForm()
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Kategori kaydedilemedi')
+    } finally {
+      setSavingCategory(false)
+    }
+  }
+
+  const deleteCategory = async (id: string | number) => {
+    if (!window.confirm('Bu kategori silinsin mi? Alt kategoriler de pasife alınır.')) return
+    try {
+      await categoriesApi.delete(id)
+      toast.success('Kategori silindi')
+      if (editingCategoryId === String(id)) resetCategoryForm()
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Kategori silinemedi')
+    }
+  }
+
+  const categoryRows = categories.flatMap((category) => [
+    { ...category, parent_name: '', depth: 0 },
+    ...(category.sub_categories || []).map((sub: any) => ({
+      ...sub,
+      parent_name: category.name,
+      depth: 1,
+    })),
+  ])
+
   if (!user) {
     return (
       <div className="max-w-xl mx-auto px-4 py-12">
@@ -387,7 +484,7 @@ export default function AdminPage() {
 
         <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
           {banners.map((banner) => {
-            const imageUrl = banner.image_url?.startsWith('http') ? banner.image_url : `${API}${banner.image_url}`
+            const imageUrl = mediaUrl(banner.image_url) || '/satgo-logo.jpeg'
             return (
               <div key={banner.id} className="overflow-hidden rounded-lg border border-gray-100 bg-white">
                 <div className="aspect-[16/7] bg-gray-100">
@@ -422,6 +519,97 @@ export default function AdminPage() {
               Henüz banner yok. İlk slider görselini ekle.
             </div>
           )}
+        </div>
+      </section>
+
+      <section className="card overflow-hidden border-2 border-brand/20">
+        <div className="p-4 border-b border-gray-100">
+          <h2 className="font-black">Kategori Yönetimi</h2>
+          <p className="text-sm text-gray-500 mt-1">Ana kategori veya alt kategori ekle, düzenle ve pasife al.</p>
+        </div>
+
+        <form onSubmit={saveCategory} className="p-4 grid gap-3 lg:grid-cols-[1fr_1fr_140px_120px_auto] lg:items-end border-b border-gray-100">
+          <div>
+            <label className="label">Üst kategori</label>
+            <select value={categoryForm.parent_id} onChange={setCategory('parent_id')} className="input">
+              <option value="">Ana kategori</option>
+              {categories
+                .filter((category) => String(category.id) !== editingCategoryId)
+                .map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">Kategori adı</label>
+            <input value={categoryForm.name} onChange={setCategory('name')} required className="input" placeholder="Örn: Evcil Hayvan" />
+          </div>
+          <div>
+            <label className="label">Slug</label>
+            <input value={categoryForm.slug} onChange={setCategory('slug')} required className="input" placeholder="evcil-hayvan" />
+          </div>
+          <div>
+            <label className="label">Sıra</label>
+            <input type="number" value={categoryForm.sort_order} onChange={setCategory('sort_order')} className="input" />
+          </div>
+          <div className="flex gap-2">
+            <button disabled={savingCategory} className="btn-brand flex min-w-[120px] items-center justify-center gap-2 whitespace-nowrap">
+              <Save className="h-4 w-4" />
+              {savingCategory ? 'Kaydediliyor...' : editingCategoryId ? 'Güncelle' : 'Ekle'}
+            </button>
+            {editingCategoryId && (
+              <button type="button" onClick={resetCategoryForm} className="btn-outline px-3 text-sm">
+                Vazgeç
+              </button>
+            )}
+          </div>
+          <div className="lg:col-span-5">
+            <label className="label">İkon</label>
+            <input value={categoryForm.icon} onChange={setCategory('icon')} className="input max-w-xs" placeholder="Emoji veya kısa ikon" />
+          </div>
+        </form>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-500">
+              <tr>
+                <th className="text-left p-3">Kategori</th>
+                <th className="text-left p-3">Üst kategori</th>
+                <th className="text-left p-3">Slug</th>
+                <th className="text-left p-3">Sıra</th>
+                <th className="text-right p-3">İşlem</th>
+              </tr>
+            </thead>
+            <tbody>
+              {categoryRows.map((category) => (
+                <tr key={category.id} className="border-t border-gray-50">
+                  <td className="p-3">
+                    <span className="font-bold">{category.depth ? `- ${category.name}` : category.name}</span>
+                  </td>
+                  <td className="p-3 text-gray-500">{category.parent_name || 'Ana kategori'}</td>
+                  <td className="p-3 font-mono text-xs">{category.slug}</td>
+                  <td className="p-3">{category.sort_order ?? 0}</td>
+                  <td className="p-3">
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => editCategory(category)} type="button" className="btn-outline flex items-center gap-1 px-3 py-1.5 text-xs">
+                        <Pencil className="h-3.5 w-3.5" />
+                        Düzenle
+                      </button>
+                      <button onClick={() => deleteCategory(category.id)} type="button" className="btn-outline flex items-center gap-1 px-3 py-1.5 text-xs text-red-500">
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Sil
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!loading && !categoryRows.length && (
+                <tr><td colSpan={5} className="p-8 text-center text-gray-400">Kategori yok.</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
 

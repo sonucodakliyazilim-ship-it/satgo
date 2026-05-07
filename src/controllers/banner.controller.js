@@ -1,10 +1,9 @@
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
-const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/database');
 
 const ensureBannerTable = async () => {
+  await query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
   await query(`
     CREATE TABLE IF NOT EXISTS banners (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -21,30 +20,20 @@ const ensureBannerTable = async () => {
   `);
 };
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadRoot = path.isAbsolute(process.env.UPLOAD_DIR || '')
-      ? process.env.UPLOAD_DIR
-      : path.join(__dirname, '../..', process.env.UPLOAD_DIR || 'uploads');
-    const dir = path.join(uploadRoot, 'banners');
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${uuidv4()}${path.extname(file.originalname).toLowerCase()}`);
-  },
-});
-
 const uploadBanner = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter: (req, file, cb) => {
-    const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
+    const allowedExts = ['.jpg', '.jpeg', '.png', '.webp'];
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
     const ext = path.extname(file.originalname).toLowerCase();
-    if (allowed.includes(ext)) cb(null, true);
-    else cb(new Error('Sadece JPG, PNG ve WEBP dosyaları kabul edilir.'), false);
+
+    if (allowedExts.includes(ext) && allowedMimes.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Sadece JPG, PNG ve WEBP dosyalari kabul edilir.'), false);
   },
   limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 },
 });
+
+const imageDataUrl = (file) => `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
 
 const getPublicBanners = async (req, res, next) => {
   try {
@@ -83,8 +72,8 @@ const createBanner = async (req, res, next) => {
   try {
     await ensureBannerTable();
     const { title, subtitle, href, placement, sort_order, is_active } = req.body;
-    if (!req.file) return res.status(400).json({ success: false, message: 'Banner görseli seçin.' });
-    const imageUrl = `/uploads/banners/${req.file.filename}`;
+    if (!req.file) return res.status(400).json({ success: false, message: 'Banner gorseli secin.' });
+
     const { rows } = await query(
       `INSERT INTO banners (title, subtitle, image_url, href, placement, sort_order, is_active)
        VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -92,7 +81,7 @@ const createBanner = async (req, res, next) => {
       [
         title,
         subtitle || null,
-        imageUrl,
+        imageDataUrl(req.file),
         href || '/ilanlar',
         placement || 'home_hero',
         Number(sort_order || 0),
@@ -109,10 +98,10 @@ const updateBanner = async (req, res, next) => {
   try {
     await ensureBannerTable();
     const current = await query('SELECT * FROM banners WHERE id = $1', [req.params.id]);
-    if (!current.rows.length) return res.status(404).json({ success: false, message: 'Banner bulunamadı.' });
+    if (!current.rows.length) return res.status(404).json({ success: false, message: 'Banner bulunamadi.' });
 
     const { title, subtitle, href, placement, sort_order, is_active } = req.body;
-    const imageUrl = req.file ? `/uploads/banners/${req.file.filename}` : current.rows[0].image_url;
+    const imageUrl = req.file ? imageDataUrl(req.file) : current.rows[0].image_url;
     const { rows } = await query(
       `UPDATE banners SET
          title = COALESCE($1, title),
@@ -137,14 +126,6 @@ const updateBanner = async (req, res, next) => {
       ],
     );
 
-    if (req.file && current.rows[0].image_url?.startsWith('/uploads/banners/')) {
-      const uploadRoot = path.isAbsolute(process.env.UPLOAD_DIR || '')
-        ? process.env.UPLOAD_DIR
-        : path.join(__dirname, '../..', process.env.UPLOAD_DIR || 'uploads');
-      const oldPath = path.join(uploadRoot, current.rows[0].image_url.replace(/^\/uploads\//, ''));
-      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-    }
-
     res.json({ success: true, data: rows[0] });
   } catch (err) {
     next(err);
@@ -155,14 +136,7 @@ const deleteBanner = async (req, res, next) => {
   try {
     await ensureBannerTable();
     const { rows } = await query('DELETE FROM banners WHERE id = $1 RETURNING *', [req.params.id]);
-    if (!rows.length) return res.status(404).json({ success: false, message: 'Banner bulunamadı.' });
-    if (rows[0].image_url?.startsWith('/uploads/banners/')) {
-      const uploadRoot = path.isAbsolute(process.env.UPLOAD_DIR || '')
-        ? process.env.UPLOAD_DIR
-        : path.join(__dirname, '../..', process.env.UPLOAD_DIR || 'uploads');
-      const filePath = path.join(uploadRoot, rows[0].image_url.replace(/^\/uploads\//, ''));
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    }
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Banner bulunamadi.' });
     res.json({ success: true, message: 'Banner silindi.' });
   } catch (err) {
     next(err);

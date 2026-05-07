@@ -1,5 +1,5 @@
-import ListingsPage from './ilanlar/page'
+import HomePage from '@/components/home/HomePage'
 
 export default function Page() {
-  return <ListingsPage />
+  return <HomePage />
 }

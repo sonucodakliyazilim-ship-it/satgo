@@ -180,6 +180,9 @@ export const bannersApi = {
 export const categoriesApi = {
   getAll: () => api.get('/categories'),
   getOne: (slug: string) => api.get(`/categories/${slug}`),
+  create: (d: any) => api.post('/categories', d),
+  update: (id: string | number, d: any) => api.patch(`/categories/${id}`, d),
+  delete: (id: string | number) => api.delete(`/categories/${id}`),
 }
 
 export const favoritesApi = {

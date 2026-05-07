@@ -28,6 +28,19 @@ const DEFAULT_SUB_CATEGORIES = [
   { parent_slug: 'elektronik', name: 'Telefon', slug: 'telefon', sort_order: 2 },
 ];
 
+const makeSlug = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
 const ensureDefaultCategories = async () => {
   for (const category of DEFAULT_CATEGORIES) {
     await query(
@@ -36,8 +49,7 @@ const ensureDefaultCategories = async () => {
        ON CONFLICT (slug) DO UPDATE SET
          name = EXCLUDED.name,
          icon = EXCLUDED.icon,
-         sort_order = EXCLUDED.sort_order,
-         is_active = TRUE`,
+         sort_order = EXCLUDED.sort_order`,
       [category.name, category.slug, category.icon, category.sort_order]
     );
   }
@@ -51,8 +63,7 @@ const ensureDefaultCategories = async () => {
        ON CONFLICT (slug) DO UPDATE SET
          parent_id = EXCLUDED.parent_id,
          name = EXCLUDED.name,
-         sort_order = EXCLUDED.sort_order,
-         is_active = TRUE`,
+         sort_order = EXCLUDED.sort_order`,
       [category.parent_slug, category.name, category.slug, category.sort_order]
     );
   }
@@ -106,10 +117,23 @@ const getCategory = async (req, res, next) => {
 const createCategory = async (req, res, next) => {
   try {
     const { parent_id, name, slug, icon, description, sort_order } = req.body;
+    const normalizedSlug = makeSlug(slug || name);
+    if (!name || !normalizedSlug) {
+      return res.status(422).json({ success: false, message: 'Kategori adi gerekli.' });
+    }
+
     const { rows } = await query(
-      `INSERT INTO categories (parent_id, name, slug, icon, description, sort_order)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [parent_id || null, name, slug, icon || null, description || null, sort_order || 0]
+      `INSERT INTO categories (parent_id, name, slug, icon, description, sort_order, is_active)
+       VALUES ($1,$2,$3,$4,$5,$6,TRUE)
+       ON CONFLICT (slug) DO UPDATE SET
+         parent_id = EXCLUDED.parent_id,
+         name = EXCLUDED.name,
+         icon = EXCLUDED.icon,
+         description = EXCLUDED.description,
+         sort_order = EXCLUDED.sort_order,
+         is_active = TRUE
+       RETURNING *`,
+      [parent_id || null, name.trim(), normalizedSlug, icon || null, description || null, sort_order || 0]
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (err) { next(err); }
@@ -118,20 +142,39 @@ const createCategory = async (req, res, next) => {
 // PATCH /api/categories/:id  (admin)
 const updateCategory = async (req, res, next) => {
   try {
-    const { name, icon, description, sort_order, is_active } = req.body;
+    const { parent_id, name, slug, icon, description, sort_order, is_active } = req.body;
+    const hasParent = Object.prototype.hasOwnProperty.call(req.body, 'parent_id');
+    const normalizedSlug = slug || name ? makeSlug(slug || name) : null;
     const { rows } = await query(
       `UPDATE categories SET
-         name        = COALESCE($1, name),
-         icon        = COALESCE($2, icon),
-         description = COALESCE($3, description),
-         sort_order  = COALESCE($4, sort_order),
-         is_active   = COALESCE($5, is_active)
-       WHERE id = $6 RETURNING *`,
-      [name, icon, description, sort_order, is_active, req.params.id]
+         parent_id   = CASE WHEN $1 THEN $2 ELSE parent_id END,
+         name        = COALESCE($3, name),
+         slug        = COALESCE($4, slug),
+         icon        = COALESCE($5, icon),
+         description = COALESCE($6, description),
+         sort_order  = COALESCE($7, sort_order),
+         is_active   = COALESCE($8, is_active)
+       WHERE id = $9 RETURNING *`,
+      [hasParent, parent_id || null, name, normalizedSlug, icon, description, sort_order, is_active, req.params.id]
     );
     if (!rows.length) return res.status(404).json({ success: false, message: 'Kategori bulunamadı.' });
     res.json({ success: true, data: rows[0] });
   } catch (err) { next(err); }
 };
 
-module.exports = { getCategories, getCategory, createCategory, updateCategory };
+// DELETE /api/categories/:id (admin)
+const deleteCategory = async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `UPDATE categories
+       SET is_active = FALSE
+       WHERE id = $1 OR parent_id = $1
+       RETURNING *`,
+      [req.params.id],
+    );
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Kategori bulunamadi.' });
+    res.json({ success: true, message: 'Kategori silindi.', data: rows });
+  } catch (err) { next(err); }
+};
+
+module.exports = { getCategories, getCategory, createCategory, updateCategory, deleteCategory };

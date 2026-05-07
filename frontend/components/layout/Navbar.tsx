@@ -274,6 +274,7 @@ export default function Navbar() {
   return (
     <header className="bg-white border-b border-gray-100 sticky top-0 z-50">
       {menuOpen && <button aria-label="Menüyü kapat" className="fixed inset-0 bg-black/65 z-40 cursor-default" onClick={() => setMenuOpen(false)} />}
+      {categoryOpen && <button aria-label="Kategorileri kapat" className="fixed inset-0 bg-black/25 z-40 cursor-default md:hidden" onClick={() => setCategoryOpen(false)} />}
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex items-center gap-3 h-14">
           <Link href="/" className="flex items-center gap-2 shrink-0" aria-label="SATGO Ana Sayfa">
@@ -438,7 +439,37 @@ export default function Navbar() {
         </div>
 
         <div className="relative">
-          <nav className="flex gap-5 h-11 items-center overflow-x-auto scrollbar-hide">
+          <nav className="flex gap-2 h-11 items-center overflow-x-auto scrollbar-hide md:hidden">
+            <button
+              type="button"
+              onClick={() => setCategoryOpen((open) => !open)}
+              className={`shrink-0 h-8 px-3 rounded-full text-sm font-black flex items-center gap-2 transition-colors ${
+                categoryOpen ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-800 border border-gray-200'
+              }`}
+            >
+              <Grid3X3 className="w-4 h-4" />
+              Kategoriler
+            </button>
+
+            {TOP_LINKS.slice(0, 5).map((label) => {
+              const index = MEGA_CATEGORIES.findIndex((category) => category.label === label)
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  className="shrink-0 h-8 rounded-full border border-gray-200 bg-white px-3 text-sm font-bold text-gray-800"
+                  onClick={() => {
+                    if (index >= 0) setActiveCategory(index)
+                    setCategoryOpen(true)
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </nav>
+
+          <nav className="hidden gap-5 h-11 items-center overflow-x-auto scrollbar-hide md:flex">
             <button
               type="button"
               onClick={() => setCategoryOpen((open) => !open)}
@@ -473,8 +504,30 @@ export default function Navbar() {
           </nav>
 
           {categoryOpen && (
-            <div className="absolute left-0 top-11 w-[min(96vw,1240px)] h-[520px] bg-white border border-gray-200 rounded-b-xl shadow-2xl overflow-hidden z-50 grid grid-cols-[260px_1fr] md:grid-cols-[310px_1fr]">
-              <div className="bg-gray-50 py-5 overflow-y-auto">
+            <div className="fixed inset-x-3 top-[105px] z-50 max-h-[72vh] overflow-y-auto rounded-2xl border border-gray-200 bg-white shadow-2xl md:absolute md:inset-auto md:left-0 md:top-11 md:h-[520px] md:w-[min(96vw,1240px)] md:max-h-none md:overflow-hidden md:rounded-b-xl md:rounded-t-none md:grid md:grid-cols-[310px_1fr]">
+              <div className="grid grid-cols-2 gap-2 p-3 md:hidden">
+                {MEGA_CATEGORIES.map((category, index) => {
+                  const Icon = category.icon
+                  return (
+                    <Link
+                      href={category.href}
+                      key={category.label}
+                      onClick={() => {
+                        setActiveCategory(index)
+                        setCategoryOpen(false)
+                      }}
+                      className="flex min-h-[68px] items-center gap-2 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-sm font-black text-gray-900"
+                    >
+                      <span className={`w-9 h-9 rounded-full ${category.color} text-white flex items-center justify-center shrink-0`}>
+                        <Icon className="w-5 h-5" />
+                      </span>
+                      <span className="min-w-0 flex-1 leading-snug">{category.label}</span>
+                    </Link>
+                  )
+                })}
+              </div>
+
+              <div className="hidden bg-gray-50 py-5 overflow-y-auto md:block">
                 {MEGA_CATEGORIES.map((category, index) => {
                   const Icon = category.icon
                   const active = index === activeCategory
@@ -497,7 +550,7 @@ export default function Navbar() {
                 })}
               </div>
 
-              <div className="p-8 overflow-y-auto">
+              <div className="hidden p-8 overflow-y-auto md:block">
                 <div className="grid grid-cols-3 gap-x-12 gap-y-7">
                   {activeMega.columns.map((column) => (
                     <div key={column.title} className="min-w-0">
