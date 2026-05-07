@@ -36,6 +36,7 @@ const buildListingQuery = ({ category, city, district, minPrice, maxPrice, searc
     oldest:   'l.created_at ASC',
     cheapest: 'l.price ASC NULLS LAST',
     priciest: 'l.price DESC NULLS LAST',
+    favorites: 'l.favorite_count DESC, l.created_at DESC',
     popular:  'l.view_count DESC',
     boosted:  'l.boosted_at DESC NULLS LAST, l.created_at DESC',
   };

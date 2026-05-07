@@ -32,6 +32,17 @@ const saveRefreshToken = async (userId, token) => {
   );
 };
 
+const getPasswordResetUrl = (token) => {
+  const frontendUrl = (
+    process.env.FRONTEND_URL ||
+    process.env.CLIENT_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    'https://satgo.vercel.app'
+  ).replace(/\/$/, '');
+
+  return `${frontendUrl}/sifre-yenile?token=${encodeURIComponent(token)}`;
+};
+
 // ── Controllers ───────────────────────────────────────────────
 
 // POST /api/auth/register
@@ -193,7 +204,12 @@ const forgotPassword = async (req, res, next) => {
     res.json({
       success: true,
       message: 'Şifre sıfırlama bağlantısı gönderildi.',
-      ...(process.env.NODE_ENV !== 'production' && { resetToken }),
+      resetToken,
+      resetUrl: getPasswordResetUrl(resetToken),
+      data: {
+        resetToken,
+        resetUrl: getPasswordResetUrl(resetToken),
+      },
     });
   } catch (err) {
     next(err);

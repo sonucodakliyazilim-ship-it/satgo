@@ -276,18 +276,18 @@ export default function Navbar() {
       {menuOpen && <button aria-label="Menüyü kapat" className="fixed inset-0 bg-black/65 z-40 cursor-default" onClick={() => setMenuOpen(false)} />}
       {categoryOpen && <button aria-label="Kategorileri kapat" className="fixed inset-0 bg-black/25 z-40 cursor-default md:hidden" onClick={() => setCategoryOpen(false)} />}
       <div className="max-w-7xl mx-auto px-4">
-        <div className="flex items-center gap-3 h-14">
-          <Link href="/" className="flex items-center gap-2 shrink-0" aria-label="SATGO Ana Sayfa">
+        <div className="flex flex-wrap items-center gap-2 py-2 md:h-14 md:flex-nowrap md:gap-3 md:py-0">
+          <Link href="/" className="order-1 flex items-center gap-2 shrink-0 md:order-none" aria-label="SATGO Ana Sayfa">
             <img src="/satgo-logo.jpeg" alt="SATGO.TR" className="h-10 w-[132px] rounded-md object-cover object-center" />
           </Link>
 
-          <form onSubmit={handleSearch} className="flex-1 relative max-w-xl">
+          <form onSubmit={handleSearch} className="order-3 relative w-full flex-none md:order-none md:flex-1 md:max-w-xl">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="İlan, marka, kategori ara..."
-              className="w-full h-10 pl-9 pr-4 bg-gray-50 border border-gray-200 rounded-full text-sm focus:outline-none focus:border-brand transition-colors"
+              className="w-full h-11 pl-9 pr-4 bg-gray-50 border border-gray-200 rounded-full text-base focus:outline-none focus:border-brand transition-colors md:h-10 md:text-sm"
             />
           </form>
 
@@ -360,7 +360,7 @@ export default function Navbar() {
           </div>
 
           {user ? (
-            <div className="relative z-50">
+            <div className="relative z-50 order-2 ml-auto md:order-none md:ml-0">
               <button
                 onClick={() => setMenuOpen(!menuOpen)}
                 className="flex items-center gap-2 border border-gray-200 rounded-full px-2 h-10 hover:border-brand transition-colors bg-white"
@@ -432,7 +432,7 @@ export default function Navbar() {
             </Link>
           )}
 
-          <Link href="/ilan-ver" className="btn-brand text-sm flex items-center gap-1.5 shrink-0">
+          <Link href="/ilan-ver" className={`btn-brand order-2 text-sm flex items-center gap-1.5 shrink-0 md:order-none ${user ? '' : 'ml-auto md:ml-0'}`}>
             <Camera className="w-4 h-4" />
             <span>Sat</span>
           </Link>

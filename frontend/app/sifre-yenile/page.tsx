@@ -16,15 +16,21 @@ export default function ResetPasswordPage() {
 function ResetPasswordContent() {
   const router = useRouter()
   const params = useSearchParams()
-  const token = params.get('token') || ''
+  const [token, setToken] = useState(params.get('token') || '')
   const [password, setPassword] = useState('')
+  const [passwordAgain, setPasswordAgain] = useState('')
   const [loading, setLoading] = useState(false)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (password !== passwordAgain) {
+      toast.error('Yeni şifreler aynı olmalı')
+      return
+    }
+
     setLoading(true)
     try {
-      await authApi.resetPassword(token, password)
+      await authApi.resetPassword(token.trim(), password)
       toast.success('Şifre yenilendi')
       router.push('/giris')
     } catch (err: any) {
@@ -42,13 +48,21 @@ function ResetPasswordContent() {
           <p className="mt-1 text-sm text-gray-500">Yeni şifren en az 6 karakter olmalı.</p>
         </div>
         <div>
+          <label className="label">Yenileme kodu</label>
+          <input value={token} onChange={(e) => setToken(e.target.value)} required className="input" placeholder="E-postadaki yenileme kodu" />
+        </div>
+        <div>
           <label className="label">Yeni şifre</label>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} className="input" />
         </div>
-        <button disabled={loading || !token} className="btn-brand w-full py-3">
+        <div>
+          <label className="label">Yeni şifre tekrar</label>
+          <input type="password" value={passwordAgain} onChange={(e) => setPasswordAgain(e.target.value)} required minLength={6} className="input" />
+        </div>
+        <button disabled={loading || !token.trim()} className="btn-brand w-full py-3">
           {loading ? 'Kaydediliyor...' : 'Şifreyi Yenile'}
         </button>
-        {!token && <p className="text-sm font-semibold text-red-500">Yenileme bağlantısı eksik veya geçersiz.</p>}
+        {!token.trim() && <p className="text-sm font-semibold text-red-500">Yenileme kodu eksik veya geçersiz.</p>}
       </form>
     </div>
   )

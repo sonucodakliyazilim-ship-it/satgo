@@ -2,8 +2,9 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { bannersApi } from '@/lib/api'
+import { bannersApi, listingsApi } from '@/lib/api'
 import { mediaUrl } from '@/lib/media'
+import ListingCard from '@/components/listings/ListingCard'
 import ListingsPage from '@/app/ilanlar/page'
 
 const fallbackBanners = [
@@ -23,14 +24,68 @@ const fallbackBanners = [
   },
 ]
 
+const listingSectionConfigs = [
+  {
+    key: 'favorites',
+    title: 'Favoriler',
+    subtitle: 'En çok favoriye eklenen ilanlar',
+    href: '/ilanlar?sortBy=favorites',
+    params: { sortBy: 'favorites' },
+  },
+  {
+    key: 'popular',
+    title: 'Çok Satanlar',
+    subtitle: 'En çok ilgi gören ilanlar',
+    href: '/ilanlar?sortBy=popular',
+    params: { sortBy: 'popular' },
+  },
+  {
+    key: 'weekly-stars',
+    title: 'Haftanın Yıldızları',
+    subtitle: 'Öne çıkan ve vitrindeki fırsatlar',
+    href: '/ilanlar?sortBy=boosted',
+    params: { sortBy: 'boosted', featured: true },
+    fallbackParams: { sortBy: 'newest' },
+  },
+]
+
 export default function HomePage() {
   const [banners, setBanners] = useState<any[]>([])
+  const [listingSections, setListingSections] = useState<any[]>([])
 
   useEffect(() => {
     bannersApi
       .getAll({ placement: 'home_hero' })
       .then(({ data }) => setBanners(data.data?.length ? data.data : fallbackBanners))
       .catch(() => setBanners(fallbackBanners))
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+
+    Promise.all(
+      listingSectionConfigs.map(async (section) => {
+        try {
+          const { data } = await listingsApi.getAll({ ...section.params, page: 1 })
+          let listings = data.data?.listings || []
+
+          if (!listings.length && section.fallbackParams) {
+            const fallback = await listingsApi.getAll({ ...section.fallbackParams, page: 1 })
+            listings = fallback.data.data?.listings || []
+          }
+
+          return { ...section, listings: listings.slice(0, 4) }
+        } catch {
+          return { ...section, listings: [] }
+        }
+      }),
+    ).then((sections) => {
+      if (mounted) setListingSections(sections)
+    })
+
+    return () => {
+      mounted = false
+    }
   }, [])
 
   const visibleBanners = banners.length ? banners : fallbackBanners
@@ -62,6 +117,30 @@ export default function HomePage() {
               </div>
             </Link>
           ))}
+        </div>
+      </section>
+      <section className="mx-auto max-w-7xl px-3 pt-5 sm:px-4 sm:pt-6">
+        <div className="space-y-6">
+          {listingSections
+            .filter((section) => section.listings.length)
+            .map((section) => (
+              <div key={section.key}>
+                <div className="mb-3 flex items-end justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-black text-gray-900 sm:text-xl">{section.title}</h2>
+                    <p className="mt-0.5 text-xs font-semibold text-gray-500 sm:text-sm">{section.subtitle}</p>
+                  </div>
+                  <Link href={section.href} className="shrink-0 text-sm font-black text-brand hover:text-brand-dark">
+                    Tümünü gör
+                  </Link>
+                </div>
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  {section.listings.map((listing: any) => (
+                    <ListingCard key={`${section.key}-${listing.id}`} listing={listing} />
+                  ))}
+                </div>
+              </div>
+            ))}
         </div>
       </section>
       <ListingsPage />
