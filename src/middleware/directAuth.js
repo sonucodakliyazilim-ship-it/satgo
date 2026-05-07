@@ -22,7 +22,7 @@ const verifyToken = async (token) => {
 };
 
 module.exports = async (req, res, next) => {
-  res.set('X-Satgo-Auth-Guard', 'direct');
+  res.set('X-Satgo-Auth-Guard', 'direct-decode-v2');
 
   try {
     const token = getAccessTokenFromRequest(req);
