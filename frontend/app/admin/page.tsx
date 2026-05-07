@@ -56,6 +56,7 @@ export default function AdminPage() {
   const [orderStatus, setOrderStatus] = useState('')
   const [loading, setLoading] = useState(true)
   const [processingOrderId, setProcessingOrderId] = useState<string | null>(null)
+  const [processingListingId, setProcessingListingId] = useState<string | null>(null)
   const [bannerForm, setBannerForm] = useState(emptyBannerForm)
   const [bannerFile, setBannerFile] = useState<File | null>(null)
   const [editingBannerId, setEditingBannerId] = useState<string | null>(null)
@@ -129,12 +130,21 @@ export default function AdminPage() {
   }
 
   const changeListingStatus = async (id: string, nextStatus: string) => {
+    setProcessingListingId(id)
     try {
-      await adminApi.setListingStatus(id, nextStatus)
+      const res = await adminApi.setListingStatus(id, nextStatus)
+      const updated = res.data.data
+      setListings((current) =>
+        status === 'pending'
+          ? current.filter((listing) => listing.id !== id)
+          : current.map((listing) => (listing.id === id ? { ...listing, ...updated } : listing)),
+      )
       toast.success('İlan durumu güncellendi')
       load()
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Durum güncellenemedi')
+    } finally {
+      setProcessingListingId(null)
     }
   }
 
@@ -524,10 +534,28 @@ export default function AdminPage() {
                   <td className="p-3">{listing.category_name}</td>
                   <td className="p-3"><StatusBadge status={listing.status} /></td>
                   <td className="p-3">
-                    <div className="flex justify-end gap-2">
-                      <button onClick={() => changeListingStatus(listing.id, 'active')} className="btn-outline text-xs py-1.5 px-3">Onayla</button>
-                      <button onClick={() => changeListingStatus(listing.id, 'rejected')} className="btn-outline text-xs py-1.5 px-3 text-red-500">Reddet</button>
-                    </div>
+                    {listing.status === 'pending' ? (
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => changeListingStatus(listing.id, 'active')}
+                          disabled={processingListingId === listing.id}
+                          className="btn-outline text-xs py-1.5 px-3 text-emerald-600"
+                        >
+                          Onayla
+                        </button>
+                        <button
+                          onClick={() => changeListingStatus(listing.id, 'rejected')}
+                          disabled={processingListingId === listing.id}
+                          className="btn-outline text-xs py-1.5 px-3 text-red-500"
+                        >
+                          Reddet
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-right text-xs font-semibold text-gray-400">
+                        {listing.status === 'active' ? 'Onaylandı' : listing.status === 'rejected' ? 'Reddedildi' : 'Sonuçlandı'}
+                      </p>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -592,7 +620,16 @@ function StatusBadge({ status, order }: { status: string; order?: boolean }) {
     rejected: 'Reddedildi',
     cancelled: 'İptal',
   }
+  const colors: Record<string, string> = {
+    pending: 'bg-amber-100 text-amber-700',
+    active: 'bg-emerald-100 text-emerald-700',
+    approved: 'bg-emerald-100 text-emerald-700',
+    rejected: 'bg-red-100 text-red-700',
+    passive: 'bg-gray-100 text-gray-600',
+    sold: 'bg-blue-100 text-blue-700',
+    cancelled: 'bg-gray-100 text-gray-600',
+  }
   const listingLabel = LISTING_STATUSES.find(([value]) => value === status)?.[1]
   const label = order ? orderLabels[status] || status : listingLabel || status
-  return <span className="inline-flex rounded-full bg-gray-100 px-2 py-1 text-xs font-bold text-gray-600">{label}</span>
+  return <span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${colors[status] || 'bg-gray-100 text-gray-600'}`}>{label}</span>
 }
