@@ -8,12 +8,18 @@ const morgan = require('morgan');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const { body } = require('express-validator');
 
 const { pool, query } = require('./config/database');
 const socketHandler = require('./utils/socketHandler');
 const auth = require('./middleware/auth');
+const directAuth = require('./middleware/directAuth');
+const { validate } = require('./middleware/validate.middleware');
 
 const authRoutes = require('./routes/auth');
+const userController = require('./controllers/user.controller');
+const listingController = require('./controllers/listing.controller');
+const uploadController = require('./controllers/upload.controller');
 const userRoutes = require('./routes/user.routes');
 const listingRoutes = require('./routes/listing.routes');
 const categoryRoutes = require('./routes/category.routes');
@@ -63,6 +69,26 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 app.use('/api/auth', authRoutes);
+
+app.get('/api/users/me/profile', directAuth, userController.getMe);
+app.get('/api/listings/me', directAuth, listingController.getMyListings);
+app.post('/api/listings',
+  directAuth,
+  [
+    body('category_id').isInt({ min: 1 }).withMessage('Geçerli bir kategori seçin.'),
+    body('title').trim().isLength({ min: 5, max: 200 }).withMessage('Başlık 5-200 karakter olmalıdır.'),
+    body('price').optional().isNumeric().isFloat({ min: 0 }).withMessage('Geçerli bir fiyat girin.'),
+    body('city').notEmpty().withMessage('Şehir seçimi zorunludur.'),
+  ],
+  validate,
+  listingController.createListing,
+);
+app.post('/api/upload/listing-images/:listingId',
+  directAuth,
+  uploadController.upload.array('images', 10),
+  uploadController.uploadListingImages,
+);
+
 app.use('/api/users', userRoutes);
 app.use('/api/listings', listingRoutes);
 app.use('/api/categories', categoryRoutes);
