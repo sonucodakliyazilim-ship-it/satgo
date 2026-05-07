@@ -2,14 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import Image from 'next/image'
 import { listingsApi, messagesApi, favoritesApi } from '@/lib/api'
-import { API_BASE_URL } from '@/lib/config'
+import { mediaUrl } from '@/lib/media'
 import { useAuthStore } from '@/lib/store'
 import { Heart, MapPin, Clock, MessageCircle, ChevronLeft, ChevronRight, Share2, Flag, Megaphone, BadgePercent } from 'lucide-react'
 import toast from 'react-hot-toast'
-
-const API = API_BASE_URL
 
 function timeAgo(d: string) {
   const diff = Date.now() - new Date(d).getTime()
@@ -30,6 +27,7 @@ export default function ListingDetailPage() {
   const [sending, setSending] = useState(false)
   const [offerSending, setOfferSending] = useState<number | null>(null)
   const [msg, setMsg] = useState('')
+  const [imageFailed, setImageFailed] = useState(false)
 
   useEffect(() => {
     listingsApi
@@ -37,6 +35,7 @@ export default function ListingDetailPage() {
       .then(({ data }) => {
         setListing(data.data)
         setFaved(data.data.is_favorited || false)
+        setImageFailed(false)
       })
       .catch(() => router.push('/ilanlar'))
       .finally(() => setLoading(false))
@@ -113,7 +112,7 @@ export default function ListingDetailPage() {
 
   const images = listing.images || []
   const img = images[imgIdx]
-  const imgUrl = img?.url ? (img.url.startsWith('http') ? img.url : `${API}${img.url}`) : null
+  const imgUrl = mediaUrl(img?.url)
   const price = Number(listing.price || 0)
   const offerOptions = price > 0
     ? [
@@ -129,8 +128,13 @@ export default function ListingDetailPage() {
         <div className="md:col-span-2 space-y-4">
           <div className="card overflow-hidden">
             <div className="relative aspect-[4/3] bg-gray-100">
-              {imgUrl ? (
-                <Image src={imgUrl} alt={listing.title} fill className="object-cover" />
+              {imgUrl && !imageFailed ? (
+                <img
+                  src={imgUrl}
+                  alt={listing.title}
+                  onError={() => setImageFailed(true)}
+                  className="h-full w-full object-cover"
+                />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-7xl">{listing.category_icon || '📦'}</div>
               )}
@@ -144,13 +148,19 @@ export default function ListingDetailPage() {
               {images.length > 1 && (
                 <>
                   <button
-                    onClick={() => setImgIdx((i) => Math.max(0, i - 1))}
+                    onClick={() => {
+                      setImageFailed(false)
+                      setImgIdx((i) => Math.max(0, i - 1))
+                    }}
                     className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 bg-white/80 rounded-full flex items-center justify-center shadow"
                   >
                     <ChevronLeft className="w-5 h-5" />
                   </button>
                   <button
-                    onClick={() => setImgIdx((i) => Math.min(images.length - 1, i + 1))}
+                    onClick={() => {
+                      setImageFailed(false)
+                      setImgIdx((i) => Math.min(images.length - 1, i + 1))
+                    }}
                     className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 bg-white/80 rounded-full flex items-center justify-center shadow"
                   >
                     <ChevronRight className="w-5 h-5" />
@@ -165,16 +175,19 @@ export default function ListingDetailPage() {
             {images.length > 1 && (
               <div className="flex gap-2 p-3 overflow-x-auto">
                 {images.map((im: any, i: number) => {
-                  const tUrl = im.url.startsWith('http') ? im.url : `${API}${im.url}`
+                  const tUrl = mediaUrl(im.url)
                   return (
                     <button
                       key={i}
-                      onClick={() => setImgIdx(i)}
+                      onClick={() => {
+                        setImageFailed(false)
+                        setImgIdx(i)
+                      }}
                       className={`w-16 h-12 rounded-lg overflow-hidden border-2 shrink-0 transition-colors ${
                         i === imgIdx ? 'border-brand' : 'border-transparent'
                       }`}
                     >
-                      <Image src={tUrl} alt="" width={64} height={48} className="object-cover w-full h-full" />
+                      {tUrl ? <img src={tUrl} alt="" className="h-full w-full object-cover" /> : null}
                     </button>
                   )
                 })}

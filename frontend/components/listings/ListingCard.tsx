@@ -1,16 +1,13 @@
 'use client'
 
 import Link from 'next/link'
-import Image from 'next/image'
 import { Heart, MapPin, Clock } from 'lucide-react'
 import { useState } from 'react'
 import { favoritesApi } from '@/lib/api'
-import { API_BASE_URL } from '@/lib/config'
+import { mediaUrl } from '@/lib/media'
 import { useAuthStore } from '@/lib/store'
 import { useRouter } from 'next/navigation'
 import toast from 'react-hot-toast'
-
-const API = API_BASE_URL
 
 function timeAgo(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime()
@@ -26,12 +23,9 @@ export default function ListingCard({ listing }: { listing: any }) {
   const router = useRouter()
   const [faved, setFaved] = useState(listing.is_favorited || false)
   const [saving, setSaving] = useState(false)
+  const [imageFailed, setImageFailed] = useState(false)
 
-  const imgSrc = listing.primary_image
-    ? listing.primary_image.startsWith('http')
-      ? listing.primary_image
-      : `${API}${listing.primary_image}`
-    : null
+  const imgSrc = mediaUrl(listing.primary_image)
 
   const toggleFav = async (e: React.MouseEvent) => {
     e.preventDefault()
@@ -60,12 +54,12 @@ export default function ListingCard({ listing }: { listing: any }) {
   return (
     <Link href={`/ilan/${listing.id}`} className="card block hover:-translate-y-1 transition-all hover:shadow-md overflow-hidden group">
       <div className="relative aspect-[4/3] bg-gray-100 overflow-hidden">
-        {imgSrc ? (
-          <Image
+        {imgSrc && !imageFailed ? (
+          <img
             src={imgSrc}
             alt={listing.title}
-            fill
-            className="object-cover group-hover:scale-105 transition-transform duration-300"
+            onError={() => setImageFailed(true)}
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-5xl">{listing.category_icon || '📦'}</div>

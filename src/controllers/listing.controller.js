@@ -246,7 +246,7 @@ const createListing = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: 'İlanınız inceleme için gönderildi.',
+      message: 'İlanınız yayına alındı.',
       data: result,
     });
   } catch (err) {

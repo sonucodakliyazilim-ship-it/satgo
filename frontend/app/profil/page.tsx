@@ -6,10 +6,8 @@ import { useRouter } from 'next/navigation'
 import { Eye, EyeOff, Heart, Megaphone, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { authApi, listingsApi, messagesApi, usersApi } from '@/lib/api'
-import { API_BASE_URL } from '@/lib/config'
+import { mediaUrl } from '@/lib/media'
 import { useAuthStore } from '@/lib/store'
-
-const API = API_BASE_URL
 
 const STATUSES: Record<string, string> = {
   pending: 'Onay Bekliyor',
@@ -443,6 +441,5 @@ function Stat({ icon: Icon, label, value }: { icon: any; label: string; value: n
 }
 
 function normalizeImage(path?: string | null) {
-  if (!path) return null
-  return path.startsWith('http') ? path : `${API}${path}`
+  return mediaUrl(path)
 }

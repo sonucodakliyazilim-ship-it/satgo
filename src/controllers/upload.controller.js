@@ -1,29 +1,16 @@
 const multer = require('multer');
 const path   = require('path');
 const fs     = require('fs');
-const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/database');
 
 // ── Multer config ─────────────────────────────────────────────
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadRoot = path.isAbsolute(process.env.UPLOAD_DIR || '')
-      ? process.env.UPLOAD_DIR
-      : path.join(__dirname, '../..', process.env.UPLOAD_DIR || 'uploads');
-    const dir = path.join(uploadRoot, 'listings');
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `${uuidv4()}${ext}`);
-  },
-});
+const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
   const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
+  const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
   const ext = path.extname(file.originalname).toLowerCase();
-  if (allowed.includes(ext)) cb(null, true);
+  if (allowed.includes(ext) && allowedMimes.includes(file.mimetype)) cb(null, true);
   else cb(new Error('Sadece JPG, PNG ve WEBP dosyaları kabul edilir.'), false);
 };
 
@@ -68,7 +55,7 @@ const uploadListingImages = async (req, res, next) => {
     const hasPrimary = isPrimaryExisting.rows.length > 0;
 
     const inserted = await Promise.all(req.files.map(async (file, idx) => {
-      const url       = `/uploads/listings/${file.filename}`;
+      const url       = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
       const isPrimary = !hasPrimary && idx === 0;
       const { rows } = await query(
         `INSERT INTO listing_images (listing_id, url, sort_order, is_primary)
@@ -98,11 +85,13 @@ const deleteListingImage = async (req, res, next) => {
     }
 
     // Remove file from disk
-    const uploadRoot = path.isAbsolute(process.env.UPLOAD_DIR || '')
-      ? process.env.UPLOAD_DIR
-      : path.join(__dirname, '../..', process.env.UPLOAD_DIR || 'uploads');
-    const filePath = path.join(uploadRoot, rows[0].url.replace(/^\/uploads\//, ''));
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    if (rows[0].url && !rows[0].url.startsWith('data:')) {
+      const uploadRoot = path.isAbsolute(process.env.UPLOAD_DIR || '')
+        ? process.env.UPLOAD_DIR
+        : path.join(__dirname, '../..', process.env.UPLOAD_DIR || 'uploads');
+      const filePath = path.join(uploadRoot, rows[0].url.replace(/^\/uploads\//, ''));
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
 
     await query('DELETE FROM listing_images WHERE id = $1', [imageId]);
 
