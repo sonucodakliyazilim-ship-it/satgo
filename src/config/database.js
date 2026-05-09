@@ -14,11 +14,12 @@ function getDatabaseUrl() {
     return directUrl;
   }
 
-  const host = process.env.PGHOST || process.env.POSTGRES_HOST;
-  const port = process.env.PGPORT || process.env.POSTGRES_PORT || '5432';
-  const database = process.env.PGDATABASE || process.env.POSTGRES_DB || process.env.POSTGRES_DATABASE;
-  const user = process.env.PGUSER || process.env.POSTGRES_USER;
-  const password = process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD;
+  const host = process.env.PGHOST || process.env.POSTGRES_HOST || process.env.DB_HOST;
+  const port = process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || '5432';
+  const database =
+    process.env.PGDATABASE || process.env.POSTGRES_DB || process.env.POSTGRES_DATABASE || process.env.DB_NAME;
+  const user = process.env.PGUSER || process.env.POSTGRES_USER || process.env.DB_USER;
+  const password = process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || process.env.DB_PASSWORD;
 
   if (host && database && user && password) {
     return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
@@ -31,7 +32,7 @@ const databaseUrl = getDatabaseUrl();
 
 if (!databaseUrl) {
   throw new Error(
-    'Database connection env is missing. Set DATABASE_URL or PGHOST, PGDATABASE, PGUSER and PGPASSWORD.',
+    'Database connection env is missing. Set DATABASE_URL, PGHOST/PGDATABASE/PGUSER/PGPASSWORD, or DB_HOST/DB_NAME/DB_USER/DB_PASSWORD.',
   );
 }
 

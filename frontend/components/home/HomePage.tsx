@@ -1,18 +1,28 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import {
+  Bell,
   Bike,
+  Car,
+  ChevronDown,
   ChevronRight,
   Coffee,
   Gamepad2,
   Heart,
   Laptop,
+  MapPin,
+  Monitor,
+  Search,
   ShieldCheck,
+  ShoppingCart,
+  Sofa,
   Smartphone,
   Sparkles,
   Trophy,
+  Truck,
 } from 'lucide-react'
 import { bannersApi, listingsApi } from '@/lib/api'
 import { mediaUrl } from '@/lib/media'
@@ -51,6 +61,21 @@ const trendCategories = [
   { label: 'Kahve Makinesi', href: '/ilanlar?search=kahve makinesi', icon: Coffee, tint: 'from-stone-700 to-orange-300' },
   { label: 'En Çok Beğenilenler', href: '/ilanlar?sortBy=favorites', icon: Heart, tint: 'from-rose-500 to-pink-300' },
   { label: 'Fitness Sporları', href: '/ilanlar?search=fitness', icon: Bike, tint: 'from-emerald-500 to-lime-300' },
+]
+
+const mobileCategories = [
+  { label: 'Araba', href: '/ilanlar?kategori=arac', icon: Car, color: 'bg-blue-600' },
+  { label: 'Telefon', href: '/ilanlar?search=telefon', icon: Smartphone, color: 'bg-violet-500' },
+  { label: 'Elektronik', href: '/ilanlar?kategori=elektronik', icon: Monitor, color: 'bg-teal-400' },
+  { label: 'Ev & Yaşam', href: '/ilanlar?kategori=ev-esyasi', icon: Sofa, color: 'bg-yellow-400' },
+  { label: 'Motosiklet', href: '/ilanlar?kategori=motor', icon: Truck, color: 'bg-orange-500' },
+  { label: 'Aksesuar', href: '/ilanlar?kategori=giyim', icon: Sparkles, color: 'bg-rose-500' },
+]
+
+const mobileTrendCards = [
+  { label: 'Cüzdanım Güvende', icon: ShieldCheck, href: '/ilanlar?sortBy=favorites' },
+  { label: 'Yerinde İncele, Kartla Öde', icon: Trophy, href: '/ilanlar?sortBy=popular' },
+  { label: 'Telefon Fırsatları', icon: Smartphone, href: '/ilanlar?search=telefon' },
 ]
 
 const listingSectionConfigs = [
@@ -138,9 +163,98 @@ export default function HomePage() {
     () => listingSections.filter((section) => section.listings.length),
     [listingSections],
   )
+  const mobileListings = useMemo(
+    () => visibleSections.flatMap((section) => section.listings).slice(0, 8),
+    [visibleSections],
+  )
 
   return (
     <main className="bg-white pb-10">
+      <div className="md:hidden bg-[#303030] pb-28 text-white">
+        <MobileHero />
+
+        <section className="border-t border-black/20 bg-[#242424] px-4 pb-4 pt-5">
+          <div className="flex gap-5 overflow-x-auto pb-1 scrollbar-hide">
+            {mobileCategories.map((category) => {
+              const Icon = category.icon
+              return (
+                <Link key={category.label} href={category.href} className="flex w-[74px] shrink-0 flex-col items-center gap-2">
+                  <span className={`grid h-14 w-14 place-items-center rounded-full ${category.color}`}>
+                    <Icon className="h-7 w-7 text-white" />
+                  </span>
+                  <span className="text-center text-xs font-black leading-tight text-white/75">{category.label}</span>
+                </Link>
+              )
+            })}
+          </div>
+        </section>
+
+        <section className="px-4 pb-4 pt-3">
+          <Link href={hero.href || '/ilanlar'} className="relative block min-h-[116px] overflow-hidden rounded-lg bg-[#ff3458]">
+            {heroImage && <img src={heroImage} alt={hero.title} className="absolute inset-0 h-full w-full object-cover opacity-35" />}
+            <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/25 to-transparent" />
+            <div className="relative flex min-h-[116px] max-w-[76%] flex-col justify-center p-4">
+              <p className="text-[11px] font-black uppercase tracking-[0.14em] text-white/70">Satgo</p>
+              <h1 className="mt-1 line-clamp-2 text-lg font-black leading-tight">{hero.title}</h1>
+              <span className="mt-3 inline-flex h-9 w-36 items-center justify-center rounded-full bg-[#ff3458] text-sm font-black text-white">
+                Ürünleri Keşfet
+              </span>
+            </div>
+            <span className="absolute bottom-3 right-3 rounded-full bg-black/45 px-2 py-1 text-xs font-black">1/{Math.max(banners.length, 1)}</span>
+          </Link>
+        </section>
+
+        <section className="px-4 pb-4">
+          <h2 className="mb-3 text-xl font-black text-white/85">Trend Kategoriler</h2>
+          <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-hide">
+            {mobileTrendCards.map((card) => {
+              const Icon = card.icon
+              return (
+                <Link key={card.label} href={card.href} className="w-[190px] shrink-0">
+                  <div className="grid aspect-[16/8] place-items-center rounded-lg bg-[#21aeea]">
+                    <Icon className="h-14 w-14 text-white" />
+                  </div>
+                  <p className="mt-2 text-sm font-black text-white/70">{card.label}</p>
+                </Link>
+              )
+            })}
+          </div>
+        </section>
+
+        <section className="border-t border-black/25 px-4 py-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-xl font-black text-white/85">Sepete Ekle, Güvenle Kapına Gelsin!</h2>
+            <Link href="/ilanlar" className="shrink-0 rounded-full bg-black px-4 py-2 text-sm font-black text-white">
+              Tümünü Gör
+            </Link>
+          </div>
+          {mobileListings.length ? (
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+              {mobileListings.map((listing: any) => (
+                <MobileListingTile key={listing.id} listing={listing} />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-white/10 bg-[#202020] p-5 text-sm font-semibold text-white/65">
+              İlk vitrin ilanları eklendiğinde burada kart olarak görünecek.
+            </div>
+          )}
+        </section>
+
+        <section className="px-4 pb-4">
+          <Link href="/ilanlar?sortBy=popular" className="relative flex min-h-[112px] items-center gap-4 overflow-hidden rounded-lg bg-[#3b3b3b] p-4">
+            <div className="grid h-20 w-20 shrink-0 place-items-center rounded-lg bg-[#21aeea]">
+              <ShieldCheck className="h-10 w-10 text-white" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-lg font-black leading-tight">Ürünü yerinde incele, kartla ödeme ve taksit seçeneğiyle satın al.</h2>
+              <span className="mt-3 inline-flex rounded-full bg-black px-4 py-2 text-sm font-black">İlanları Gör</span>
+            </div>
+          </Link>
+        </section>
+      </div>
+
+      <div className="hidden md:block">
       <section className="mx-auto max-w-6xl px-3 pt-4 sm:px-4 sm:pt-5">
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)]">
         <Link
@@ -289,6 +403,107 @@ export default function HomePage() {
           </div>
         )}
       </section>
+      </div>
     </main>
+  )
+}
+
+function MobileHero() {
+  const router = useRouter()
+  const [search, setSearch] = useState('')
+
+  const handleSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const term = search.trim()
+    if (term) router.push(`/ilanlar?search=${encodeURIComponent(term)}`)
+  }
+
+  return (
+    <section className="bg-[#202020] px-4 pb-5 pt-5">
+      <div className="flex items-center gap-3">
+        <Link href="/" className="mr-auto text-[34px] font-black italic leading-none tracking-tight text-white">
+          satgo
+        </Link>
+        <Link
+          href="/ilanlar?city=Antalya"
+          className="flex h-11 max-w-[170px] items-center gap-2 rounded-full bg-[#303030] px-3 text-sm font-black text-white"
+        >
+          <MapPin className="h-5 w-5 shrink-0 text-[#ff3458]" />
+          <span className="truncate">Antalya, Ala...</span>
+          <ChevronDown className="h-4 w-4 shrink-0 text-[#ff3458]" />
+        </Link>
+        <Link href="/ilanlar?sortBy=popular" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#303030]">
+          <ShoppingCart className="h-6 w-6 text-white" />
+        </Link>
+        <Link href="/mesajlar" className="relative grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#303030]">
+          <Bell className="h-6 w-6 text-white" />
+          <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-[#ff3458] px-1 text-xs font-black text-white">
+            4
+          </span>
+        </Link>
+      </div>
+
+      <form onSubmit={handleSearch} className="relative mt-5">
+        <Search className="absolute left-4 top-1/2 h-7 w-7 -translate-y-1/2 text-white/60" />
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Ürün, marka, kategori, satıcı ara"
+          className="h-[58px] w-full rounded-full border-0 bg-[#3d3d3d] pl-14 pr-5 text-base font-black text-white placeholder:text-white/55 focus:outline-none focus:ring-2 focus:ring-[#ff3458]"
+        />
+      </form>
+    </section>
+  )
+}
+
+function MobileListingTile({ listing }: { listing: any }) {
+  const [imageFailed, setImageFailed] = useState(false)
+  const imgSrc = mediaUrl(listing.primary_image)
+  const price = Number(listing.price || 0).toLocaleString('tr-TR')
+
+  return (
+    <article className="w-[190px] shrink-0 overflow-hidden rounded-lg bg-black text-white">
+      <Link href={`/ilan/${listing.id}`} className="relative block aspect-[4/5] overflow-hidden bg-[#4a4a4a]">
+        {imgSrc && !imageFailed ? (
+          <img
+            src={imgSrc}
+            alt={listing.title}
+            onError={() => setImageFailed(true)}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="grid h-full w-full place-items-center bg-[#21aeea] text-4xl font-black text-white">
+            {listing.category_icon || 'SATGO'}
+          </div>
+        )}
+        <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-yellow-300 px-3 py-1.5 text-xs font-black text-black">
+          <Sparkles className="h-3.5 w-3.5 fill-black" />
+          Öne Çıkan
+        </span>
+        <span className="absolute right-3 top-3 grid h-10 w-10 place-items-center rounded-full bg-[#252525]/90">
+          <Heart className="h-6 w-6 text-white" />
+        </span>
+        <span className="absolute bottom-3 left-3 inline-flex max-w-[136px] items-center gap-1 rounded-lg bg-[#252525]/90 px-2 py-1.5 text-[11px] font-black leading-tight">
+          <ShieldCheck className="h-5 w-5 shrink-0 fill-lime-500 text-lime-500" />
+          Cüzdanım Güvende
+        </span>
+      </Link>
+      <div className="p-3">
+        <Link href={`/ilan/${listing.id}`} className="block">
+          <div className="flex items-center justify-between gap-2">
+            <p className="min-w-0 truncate text-2xl font-black">{price} TL</p>
+            <span className="shrink-0 rounded-full bg-white px-2 py-1 text-[11px] font-black text-[#222]">12 taksit!</span>
+          </div>
+          <p className="mt-2 line-clamp-1 text-base font-medium text-white/70">{listing.title}</p>
+        </Link>
+        <Link
+          href={`/ilan/${listing.id}`}
+          className="mt-4 flex h-11 items-center justify-center gap-2 rounded-full bg-[#ff3458] text-base font-black text-white"
+        >
+          <ShoppingCart className="h-5 w-5" />
+          Sepete Ekle
+        </Link>
+      </div>
+    </article>
   )
 }

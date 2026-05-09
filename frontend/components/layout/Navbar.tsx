@@ -1,7 +1,7 @@
 ﻿'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   Baby,
   Bike,
@@ -218,6 +218,7 @@ const USER_PANEL_LINKS = [
 export default function Navbar() {
   const { user, logout, selectedCity, selectedDistrict, setSelectedLocation } = useAuthStore()
   const router = useRouter()
+  const pathname = usePathname()
   const [search, setSearch] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const [locationOpen, setLocationOpen] = useState(false)
@@ -272,7 +273,7 @@ export default function Navbar() {
   }
 
   return (
-    <header className="bg-white border-b border-gray-100 sticky top-0 z-50">
+    <header className={`bg-white border-b border-gray-100 sticky top-0 z-50 ${pathname === '/' ? 'hidden md:block' : ''}`}>
       {menuOpen && <button aria-label="Menüyü kapat" className="fixed inset-0 bg-black/65 z-40 cursor-default" onClick={() => setMenuOpen(false)} />}
       {categoryOpen && <button aria-label="Kategorileri kapat" className="fixed inset-0 bg-black/25 z-40 cursor-default md:hidden" onClick={() => setCategoryOpen(false)} />}
       <div className="max-w-7xl mx-auto px-4">
