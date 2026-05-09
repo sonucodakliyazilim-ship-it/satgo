@@ -183,6 +183,15 @@ export const categoriesApi = {
   create: (d: any) => api.post('/categories', d),
   update: (id: string | number, d: any) => api.patch(`/categories/${id}`, d),
   delete: (id: string | number) => api.delete(`/categories/${id}`),
+  importCsv: (d: any) => api.post('/categories/import', d),
+}
+
+export const hierarchyApi = {
+  getTree: (group = 'vehicle') => api.get('/hierarchy', { params: { group } }),
+  create: (d: any) => api.post('/hierarchy', d),
+  update: (id: string, d: any) => api.patch(`/hierarchy/${id}`, d),
+  delete: (id: string) => api.delete(`/hierarchy/${id}`),
+  importCsv: (d: any) => api.post('/hierarchy/import', d),
 }
 
 export const favoritesApi = {

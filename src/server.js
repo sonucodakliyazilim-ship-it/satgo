@@ -29,6 +29,7 @@ const promotionRoutes = require('./routes/promotion.routes');
 const adminRoutes = require('./routes/admin.routes');
 const uploadRoutes = require('./routes/upload.routes');
 const bannerRoutes = require('./routes/banner.routes');
+const hierarchyRoutes = require('./routes/hierarchy.routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -53,7 +54,7 @@ app.use(helmet({
 }));
 app.use(compression());
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 const uploadRoot = path.isAbsolute(process.env.UPLOAD_DIR || '')
@@ -92,6 +93,7 @@ app.post('/api/upload/listing-images/:listingId',
 app.use('/api/users', userRoutes);
 app.use('/api/listings', listingRoutes);
 app.use('/api/categories', categoryRoutes);
+app.use('/api/hierarchy', hierarchyRoutes);
 app.use('/api/favorites', favoriteRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/promotions', promotionRoutes);

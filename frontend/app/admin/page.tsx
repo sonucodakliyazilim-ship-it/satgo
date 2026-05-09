@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CheckCircle2, ImagePlus, Landmark, Pencil, RefreshCw, Save, Trash2, XCircle } from 'lucide-react'
+import { CheckCircle2, CreditCard, Database, FileUp, ImagePlus, Images, Landmark, ListChecks, Pencil, RefreshCw, Save, Tags, Trash2, UploadCloud, Users, XCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { adminApi, categoriesApi } from '@/lib/api'
 import { mediaUrl } from '@/lib/media'
 import { useAuthStore } from '@/lib/store'
+import HierarchyManager from '@/components/admin/HierarchyManager'
 
 const LISTING_STATUSES = [
   ['pending', 'Beklemede'],
@@ -21,6 +22,15 @@ const ORDER_STATUSES = [
   ['pending', 'Bekleyen talepler'],
   ['approved', 'Onaylananlar'],
   ['rejected', 'Reddedilenler'],
+]
+
+const ADMIN_TABS = [
+  { key: 'listings', label: 'İlanlar', icon: ListChecks },
+  { key: 'users', label: 'Kullanıcılar', icon: Users },
+  { key: 'categories', label: 'Kategoriler', icon: Tags },
+  { key: 'hierarchy', label: 'Hiyerarşi', icon: Database },
+  { key: 'banners', label: 'Bannerlar', icon: Images },
+  { key: 'payments', label: 'Ödeme', icon: CreditCard },
 ]
 
 const money = (value: number | string) =>
@@ -75,6 +85,7 @@ export default function AdminPage() {
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm)
   const [status, setStatus] = useState('')
   const [orderStatus, setOrderStatus] = useState('')
+  const [activeTab, setActiveTab] = useState('listings')
   const [loading, setLoading] = useState(true)
   const [processingOrderId, setProcessingOrderId] = useState<string | null>(null)
   const [processingListingId, setProcessingListingId] = useState<string | null>(null)
@@ -83,9 +94,12 @@ export default function AdminPage() {
   const [editingBannerId, setEditingBannerId] = useState<string | null>(null)
   const [categoryForm, setCategoryForm] = useState(emptyCategoryForm)
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
+  const [categoryCsv, setCategoryCsv] = useState('Araç>Otomobil\nAraç>SUV & 4x4\nElektronik>Telefon\nEv Eşyası>Beyaz Eşya')
+  const [categoryCsvFile, setCategoryCsvFile] = useState<File | null>(null)
   const [savingBanner, setSavingBanner] = useState(false)
   const [savingPayment, setSavingPayment] = useState(false)
   const [savingCategory, setSavingCategory] = useState(false)
+  const [importingCategory, setImportingCategory] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -325,6 +339,33 @@ export default function AdminPage() {
     }
   }
 
+  const readCategoryCsvFile = async (file?: File | null) => {
+    if (!file) return
+    setCategoryCsvFile(file)
+    setCategoryCsv(await file.text())
+  }
+
+  const importCategoryCsv = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setImportingCategory(true)
+    try {
+      if (categoryCsvFile) {
+        const fd = new FormData()
+        fd.append('file', categoryCsvFile)
+        await categoriesApi.importCsv(fd)
+      } else {
+        await categoriesApi.importCsv({ csv: categoryCsv })
+      }
+      toast.success('Kategori CSV aktarıldı')
+      setCategoryCsvFile(null)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Kategori CSV aktarılamadı')
+    } finally {
+      setImportingCategory(false)
+    }
+  }
+
   const categoryRows = categories.flatMap((category) => [
     { ...category, parent_name: '', depth: 0 },
     ...(category.sub_categories || []).map((sub: any) => ({
@@ -372,6 +413,27 @@ export default function AdminPage() {
         </div>
       )}
 
+      <nav className="flex gap-2 overflow-x-auto rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
+        {ADMIN_TABS.map((tab) => {
+          const Icon = tab.icon
+          const active = activeTab === tab.key
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              className={`inline-flex h-11 shrink-0 items-center gap-2 rounded-lg px-4 text-sm font-black transition-colors ${
+                active ? 'bg-gray-950 text-white' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-950'
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              {tab.label}
+            </button>
+          )
+        })}
+      </nav>
+
+      {activeTab === 'payments' && (
       <section className="card overflow-hidden border-2 border-brand/20">
         <div className="p-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -429,7 +491,9 @@ export default function AdminPage() {
           Güncelleme sonrası oluşturulan yeni ödeme talimatları bu bilgileri kullanır; mevcut talimatların kayıtlı bilgisi değişmez.
         </div>
       </section>
+      )}
 
+      {activeTab === 'banners' && (
       <section className="card overflow-hidden border-2 border-brand/20">
         <div className="p-4 border-b border-gray-100">
           <h2 className="font-black">Banner ve Slider Görselleri</h2>
@@ -521,12 +585,44 @@ export default function AdminPage() {
           )}
         </div>
       </section>
+      )}
 
+      {activeTab === 'categories' && (
       <section className="card overflow-hidden border-2 border-brand/20">
         <div className="p-4 border-b border-gray-100">
           <h2 className="font-black">Kategori Yönetimi</h2>
           <p className="text-sm text-gray-500 mt-1">Ana kategori veya alt kategori ekle, düzenle ve pasife al.</p>
         </div>
+
+        <form onSubmit={importCategoryCsv} className="grid gap-3 border-b border-gray-100 bg-gray-50 p-4 lg:grid-cols-[1fr_240px]">
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <label className="label mb-0">CSV ile kategori yükle</label>
+              {categoryCsvFile && <span className="max-w-[220px] truncate text-xs font-black text-brand">{categoryCsvFile.name}</span>}
+            </div>
+            <textarea
+              value={categoryCsv}
+              onChange={(e) => {
+                setCategoryCsv(e.target.value)
+                setCategoryCsvFile(null)
+              }}
+              rows={4}
+              className="input resize-none bg-white font-mono text-xs"
+              placeholder="Ana Kategori>Alt Kategori"
+            />
+          </div>
+          <div className="flex flex-col justify-end gap-2">
+            <label className="btn-outline flex cursor-pointer items-center justify-center gap-2 px-3 py-2 text-sm">
+              <UploadCloud className="h-4 w-4" />
+              CSV Dosyası Seç
+              <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => readCategoryCsvFile(e.target.files?.[0])} />
+            </label>
+            <button disabled={importingCategory} className="btn-brand flex items-center justify-center gap-2">
+              <FileUp className="h-4 w-4" />
+              {importingCategory ? 'Aktarılıyor...' : 'Kategorileri Aktar'}
+            </button>
+          </div>
+        </form>
 
         <form onSubmit={saveCategory} className="p-4 grid gap-3 lg:grid-cols-[1fr_1fr_140px_120px_auto] lg:items-end border-b border-gray-100">
           <div>
@@ -612,7 +708,11 @@ export default function AdminPage() {
           </table>
         </div>
       </section>
+      )}
 
+      {activeTab === 'hierarchy' && <HierarchyManager />}
+
+      {activeTab === 'payments' && (
       <section className="card overflow-hidden border-2 border-brand/20">
         <div className="p-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -689,7 +789,9 @@ export default function AdminPage() {
           </table>
         </div>
       </section>
+      )}
 
+      {activeTab === 'listings' && (
       <section className="card overflow-hidden">
         <div className="p-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-black">İlan Yönetimi</h2>
@@ -754,7 +856,9 @@ export default function AdminPage() {
           </table>
         </div>
       </section>
+      )}
 
+      {activeTab === 'users' && (
       <section className="card overflow-hidden">
         <div className="p-4 border-b border-gray-100">
           <h2 className="font-black">Kullanıcılar</h2>
@@ -788,6 +892,7 @@ export default function AdminPage() {
           </table>
         </div>
       </section>
+      )}
     </div>
   )
 }

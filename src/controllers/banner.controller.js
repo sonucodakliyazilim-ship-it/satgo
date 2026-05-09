@@ -1,6 +1,39 @@
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 const { query } = require('../config/database');
+
+const getUploadRoot = () =>
+  path.isAbsolute(process.env.UPLOAD_DIR || '')
+    ? process.env.UPLOAD_DIR
+    : path.join(__dirname, '../..', process.env.UPLOAD_DIR || 'uploads');
+
+const extensionByMime = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+};
+
+const saveBannerImage = async (file) => {
+  const uploadRoot = getUploadRoot();
+  const directory = path.join(uploadRoot, 'banners');
+  await fs.promises.mkdir(directory, { recursive: true });
+
+  const ext = extensionByMime[file.mimetype] || path.extname(file.originalname).toLowerCase() || '.jpg';
+  const filename = `${Date.now()}-${crypto.randomUUID()}${ext}`;
+  await fs.promises.writeFile(path.join(directory, filename), file.buffer);
+  return `/uploads/banners/${filename}`;
+};
+
+const resolveStoredUploadPath = (url) => {
+  if (!url || url.startsWith('data:')) return null;
+  const uploadRoot = path.resolve(getUploadRoot());
+  const relative = url.replace(/^\/uploads\//, '').replace(/^uploads\//, '');
+  const filePath = path.resolve(uploadRoot, relative);
+  if (!filePath.startsWith(uploadRoot + path.sep) && filePath !== uploadRoot) return null;
+  return filePath;
+};
 
 const ensureBannerTable = async () => {
   await query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
@@ -32,8 +65,6 @@ const uploadBanner = multer({
   },
   limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 },
 });
-
-const imageDataUrl = (file) => `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
 
 const getPublicBanners = async (req, res, next) => {
   try {
@@ -81,7 +112,7 @@ const createBanner = async (req, res, next) => {
       [
         title,
         subtitle || null,
-        imageDataUrl(req.file),
+        await saveBannerImage(req.file),
         href || '/ilanlar',
         placement || 'home_hero',
         Number(sort_order || 0),
@@ -101,7 +132,7 @@ const updateBanner = async (req, res, next) => {
     if (!current.rows.length) return res.status(404).json({ success: false, message: 'Banner bulunamadi.' });
 
     const { title, subtitle, href, placement, sort_order, is_active } = req.body;
-    const imageUrl = req.file ? imageDataUrl(req.file) : current.rows[0].image_url;
+    const imageUrl = req.file ? await saveBannerImage(req.file) : current.rows[0].image_url;
     const { rows } = await query(
       `UPDATE banners SET
          title = COALESCE($1, title),
@@ -126,6 +157,13 @@ const updateBanner = async (req, res, next) => {
       ],
     );
 
+    if (req.file) {
+      const oldPath = resolveStoredUploadPath(current.rows[0].image_url);
+      if (oldPath && fs.existsSync(oldPath)) {
+        await fs.promises.unlink(oldPath);
+      }
+    }
+
     res.json({ success: true, data: rows[0] });
   } catch (err) {
     next(err);
@@ -137,6 +175,10 @@ const deleteBanner = async (req, res, next) => {
     await ensureBannerTable();
     const { rows } = await query('DELETE FROM banners WHERE id = $1 RETURNING *', [req.params.id]);
     if (!rows.length) return res.status(404).json({ success: false, message: 'Banner bulunamadi.' });
+    const filePath = resolveStoredUploadPath(rows[0].image_url);
+    if (filePath && fs.existsSync(filePath)) {
+      await fs.promises.unlink(filePath);
+    }
     res.json({ success: true, message: 'Banner silindi.' });
   } catch (err) {
     next(err);

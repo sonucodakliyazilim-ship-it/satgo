@@ -1,10 +1,46 @@
 const multer = require('multer');
 const path   = require('path');
 const fs     = require('fs');
+const crypto = require('crypto');
 const { query } = require('../config/database');
 
 // ── Multer config ─────────────────────────────────────────────
 const storage = multer.memoryStorage();
+
+const getUploadRoot = () =>
+  path.isAbsolute(process.env.UPLOAD_DIR || '')
+    ? process.env.UPLOAD_DIR
+    : path.join(__dirname, '../..', process.env.UPLOAD_DIR || 'uploads');
+
+const extensionByMime = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+};
+
+const saveListingImage = async (listingId, file) => {
+  const uploadRoot = getUploadRoot();
+  const directory = path.join(uploadRoot, 'listings', String(listingId));
+  await fs.promises.mkdir(directory, { recursive: true });
+
+  const ext = extensionByMime[file.mimetype] || path.extname(file.originalname).toLowerCase() || '.jpg';
+  const filename = `${Date.now()}-${crypto.randomUUID()}${ext}`;
+  const filePath = path.join(directory, filename);
+
+  await fs.promises.writeFile(filePath, file.buffer);
+  return `/uploads/listings/${listingId}/${filename}`;
+};
+
+const resolveStoredUploadPath = (url) => {
+  if (!url || url.startsWith('data:')) return null;
+
+  const uploadRoot = path.resolve(getUploadRoot());
+  const relative = url.replace(/^\/uploads\//, '').replace(/^uploads\//, '');
+  const filePath = path.resolve(uploadRoot, relative);
+
+  if (!filePath.startsWith(uploadRoot + path.sep) && filePath !== uploadRoot) return null;
+  return filePath;
+};
 
 const fileFilter = (req, file, cb) => {
   const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
@@ -55,7 +91,7 @@ const uploadListingImages = async (req, res, next) => {
     const hasPrimary = isPrimaryExisting.rows.length > 0;
 
     const inserted = await Promise.all(req.files.map(async (file, idx) => {
-      const url       = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+      const url = await saveListingImage(listingId, file);
       const isPrimary = !hasPrimary && idx === 0;
       const { rows } = await query(
         `INSERT INTO listing_images (listing_id, url, sort_order, is_primary)
@@ -85,12 +121,9 @@ const deleteListingImage = async (req, res, next) => {
     }
 
     // Remove file from disk
-    if (rows[0].url && !rows[0].url.startsWith('data:')) {
-      const uploadRoot = path.isAbsolute(process.env.UPLOAD_DIR || '')
-        ? process.env.UPLOAD_DIR
-        : path.join(__dirname, '../..', process.env.UPLOAD_DIR || 'uploads');
-      const filePath = path.join(uploadRoot, rows[0].url.replace(/^\/uploads\//, ''));
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    const filePath = resolveStoredUploadPath(rows[0].url);
+    if (filePath && fs.existsSync(filePath)) {
+      await fs.promises.unlink(filePath);
     }
 
     await query('DELETE FROM listing_images WHERE id = $1', [imageId]);
@@ -98,9 +131,14 @@ const deleteListingImage = async (req, res, next) => {
     // If it was primary, promote next image
     if (rows[0].is_primary) {
       await query(
-        `UPDATE listing_images SET is_primary = TRUE
-         WHERE listing_id = $1
-         ORDER BY sort_order LIMIT 1`,
+        `UPDATE listing_images
+         SET is_primary = TRUE
+         WHERE id = (
+           SELECT id FROM listing_images
+           WHERE listing_id = $1
+           ORDER BY sort_order ASC, created_at ASC
+           LIMIT 1
+         )`,
         [rows[0].listing_id]
       );
     }

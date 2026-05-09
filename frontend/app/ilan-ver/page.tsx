@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { categoriesApi, listingsApi, uploadApi } from '@/lib/api'
+import { categoriesApi, hierarchyApi, listingsApi, uploadApi } from '@/lib/api'
 import { defaultCategories } from '@/lib/defaultCategories'
 import { useAuthStore } from '@/lib/store'
 import cities from '@/lib/cities.json'
@@ -26,6 +26,33 @@ const FUEL_TYPES = [
   ['hybrid', 'Hibrit'],
 ]
 
+const YES_NO = [
+  ['false', 'Hayır'],
+  ['true', 'Evet'],
+]
+
+const DRIVE_TYPES = [
+  ['front', 'Önden Çekiş'],
+  ['rear', 'Arkadan İtiş'],
+  ['awd', '4x4 / AWD'],
+]
+
+const PLATE_TYPES = [
+  ['tr', 'TR Plaka'],
+  ['foreign', 'Yabancı Plaka'],
+  ['none', 'Plaka Yok'],
+]
+
+const BODY_TYPES = [
+  ['sedan', 'Sedan'],
+  ['hatchback', 'Hatchback'],
+  ['suv', 'SUV'],
+  ['coupe', 'Coupe'],
+  ['wagon', 'Station Wagon'],
+  ['van', 'Van'],
+  ['pickup', 'Pickup'],
+]
+
 const HEATING_TYPES = [
   ['central', 'Merkezi'],
   ['floor', 'Yerden Isıtma'],
@@ -35,6 +62,12 @@ const HEATING_TYPES = [
   ['solar', 'Güneş'],
   ['none', 'Yok'],
 ]
+
+type HierarchyNode = {
+  id: string
+  label: string
+  children?: HierarchyNode[]
+}
 
 const VEHICLE_BRANDS: Record<string, string[]> = {
   'Alfa Romeo': ['Giulietta', 'Giulia', 'Stelvio', 'Tonale', 'MiTo', '156', '159'],
@@ -99,10 +132,62 @@ const MOTOR_BRANDS: Record<string, string[]> = {
   Yamaha: ['NMAX 125', 'XMAX 250', 'Tracer 700', 'MT-07', 'MT-09', 'R25', 'R7', 'Tenere 700'],
 }
 
+const toFallbackTree = (items: Record<string, string[]>): HierarchyNode[] =>
+  Object.entries(items).map(([brand, models]) => ({
+    id: brand,
+    label: brand,
+    children: models.map((model) => ({ id: `${brand}-${model}`, label: model, children: [] })),
+  }))
+
+const fallbackVehicleTree = toFallbackTree(VEHICLE_BRANDS)
+const fallbackMotorTree = toFallbackTree(MOTOR_BRANDS)
+
+const HIERARCHY_LABELS: Record<string, string[]> = {
+  vehicle: ['Marka', 'Model', 'Seri / Donanım', 'Paket'],
+  motor: ['Marka', 'Model', 'Seri / Donanım', 'Paket'],
+  elektronik: ['Tür', 'Marka', 'Model', 'Seri'],
+  emlak: ['Emlak Tipi', 'İlan Tipi', 'Alt Tür', 'Detay'],
+  'ev-esyasi': ['Grup', 'Ürün', 'Özellik', 'Detay'],
+  giyim: ['Cinsiyet', 'Ürün', 'Tür', 'Detay'],
+  hizmet: ['Hizmet', 'Alan', 'Detay', 'Paket'],
+  'is-ilanlari': ['Çalışma Tipi', 'Departman', 'Pozisyon', 'Seviye'],
+  spor: ['Branş', 'Ürün', 'Tür', 'Detay'],
+  diger: ['Grup', 'Alt Grup', 'Tür', 'Detay'],
+}
+
+const getHierarchyGroup = (category?: any) => {
+  if (!category?.slug) return ''
+  if (category.slug === 'arac') return 'vehicle'
+  if (category.slug === 'motor') return 'motor'
+  return category.slug
+}
+
+const getLevelLabel = (group: string, level: number) =>
+  HIERARCHY_LABELS[group]?.[level] || `${level + 1}. seviye`
+
+const getNodePath = (nodes: HierarchyNode[], labels: string[]) => {
+  const path: HierarchyNode[] = []
+  let current = nodes
+
+  for (const label of labels.filter(Boolean)) {
+    const node = current.find((item) => item.label === label)
+    if (!node) break
+    path.push(node)
+    current = node.children || []
+  }
+
+  return path
+}
+
 export default function CreateListingPage() {
   const router = useRouter()
   const { user, authReady, setUser } = useAuthStore()
   const [categories, setCategories] = useState<any[]>(defaultCategories)
+  const [vehicleTree, setVehicleTree] = useState<HierarchyNode[]>(fallbackVehicleTree)
+  const [motorTree, setMotorTree] = useState<HierarchyNode[]>(fallbackMotorTree)
+  const [genericTree, setGenericTree] = useState<HierarchyNode[]>([])
+  const [genericSelections, setGenericSelections] = useState<string[]>([])
+  const [hierarchyLoading, setHierarchyLoading] = useState(false)
   const [files, setFiles] = useState<File[]>([])
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
@@ -116,14 +201,33 @@ export default function CreateListingPage() {
     district: '',
     vehicle_brand: '',
     vehicle_model: '',
+    vehicle_series: '',
+    vehicle_package: '',
+    vehicle_type_name: '',
     vehicle_year: '',
     vehicle_mileage: '',
     fuel_type: 'gasoline',
     transmission: 'automatic',
     body_type: 'sedan',
+    drive_type: 'front',
     color: '',
+    has_warranty: 'false',
+    warranty_remaining: '',
+    has_lpg: 'false',
+    has_damage_record: 'false',
+    tramer_record: 'false',
+    lien_pledge_status: 'none',
+    plate_type: 'tr',
+    plate_number: '',
+    chassis_last6: '',
+    trade_in: 'false',
+    legal_brand: '',
+    commercial_name: '',
+    legal_model_year: '',
     moto_brand: '',
     moto_model: '',
+    moto_series: '',
+    moto_package: '',
     moto_year: '',
     moto_mileage: '',
     engine_cc: '',
@@ -144,10 +248,66 @@ export default function CreateListingPage() {
       .catch(() => setCategories(defaultCategories))
   }, [])
 
+  useEffect(() => {
+    hierarchyApi
+      .getTree('vehicle')
+      .then(({ data }) => setVehicleTree(data.data?.length ? data.data : fallbackVehicleTree))
+      .catch(() => setVehicleTree(fallbackVehicleTree))
+
+    hierarchyApi
+      .getTree('motor')
+      .then(({ data }) => setMotorTree(data.data?.length ? data.data : fallbackMotorTree))
+      .catch(() => setMotorTree(fallbackMotorTree))
+  }, [])
+
   const selectedCategory = categories.find((c) => String(c.id) === form.category_id)
+  const selectedHierarchyGroup = getHierarchyGroup(selectedCategory)
+
+  useEffect(() => {
+    if (!selectedHierarchyGroup || selectedHierarchyGroup === 'vehicle' || selectedHierarchyGroup === 'motor') {
+      setGenericTree([])
+      setGenericSelections([])
+      return
+    }
+
+    setHierarchyLoading(true)
+    hierarchyApi
+      .getTree(selectedHierarchyGroup)
+      .then(({ data }) => setGenericTree(data.data || []))
+      .catch(() => setGenericTree([]))
+      .finally(() => setHierarchyLoading(false))
+  }, [selectedHierarchyGroup])
+
   const selectedCity = (cities as any[]).find((c) => c.cityName === form.city)
-  const vehicleModels = VEHICLE_BRANDS[form.vehicle_brand] || []
-  const motoModels = MOTOR_BRANDS[form.moto_brand] || []
+  const selectedVehicleBrand = vehicleTree.find((item) => item.label === form.vehicle_brand)
+  const selectedVehicleModel = selectedVehicleBrand?.children?.find((item) => item.label === form.vehicle_model)
+  const selectedVehicleSeries = selectedVehicleModel?.children?.find((item) => item.label === form.vehicle_series)
+  const selectedVehiclePackage = selectedVehicleSeries?.children?.find((item) => item.label === form.vehicle_package)
+  const selectedMotorBrand = motorTree.find((item) => item.label === form.moto_brand)
+  const selectedMotorModel = selectedMotorBrand?.children?.find((item) => item.label === form.moto_model)
+  const selectedMotorSeries = selectedMotorModel?.children?.find((item) => item.label === form.moto_series)
+  const selectedMotorPackage = selectedMotorSeries?.children?.find((item) => item.label === form.moto_package)
+  const vehicleModels = selectedVehicleBrand?.children || []
+  const vehicleSeries = selectedVehicleModel?.children || []
+  const vehiclePackages = selectedVehicleSeries?.children || []
+  const motoModels = selectedMotorBrand?.children || []
+  const motoSeries = selectedMotorModel?.children || []
+  const motoPackages = selectedMotorSeries?.children || []
+  const genericLevels = useMemo(() => {
+    const levels: HierarchyNode[][] = []
+    let current = genericTree
+
+    for (let level = 0; current.length; level += 1) {
+      levels.push(current)
+      const selectedLabel = genericSelections[level]
+      if (!selectedLabel) break
+      const selectedNode = current.find((item) => item.label === selectedLabel)
+      current = selectedNode?.children || []
+    }
+
+    return levels
+  }, [genericTree, genericSelections])
+  const genericNodePath = useMemo(() => getNodePath(genericTree, genericSelections), [genericTree, genericSelections])
   const cityDistricts = useMemo(
     () => (districts as any[]).filter((d) => d.cityCode === selectedCity?.cityCode),
     [selectedCity?.cityCode],
@@ -156,13 +316,18 @@ export default function CreateListingPage() {
   const previews = useMemo(() => files.map((file) => ({ file, url: URL.createObjectURL(file) })), [files])
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const value = e.target.value
+    if (key === 'category_id') setGenericSelections([])
     setForm((f) => ({
       ...f,
       [key]: value,
-      ...(key === 'category_id' ? { sub_category_id: '', vehicle_brand: '', vehicle_model: '', moto_brand: '', moto_model: '' } : {}),
+      ...(key === 'category_id' ? { sub_category_id: '', vehicle_brand: '', vehicle_model: '', vehicle_series: '', vehicle_package: '', moto_brand: '', moto_model: '', moto_series: '', moto_package: '' } : {}),
       ...(key === 'city' ? { district: '' } : {}),
-      ...(key === 'vehicle_brand' ? { vehicle_model: '' } : {}),
-      ...(key === 'moto_brand' ? { moto_model: '' } : {}),
+      ...(key === 'vehicle_brand' ? { vehicle_model: '', vehicle_series: '', vehicle_package: '' } : {}),
+      ...(key === 'vehicle_model' ? { vehicle_series: '', vehicle_package: '' } : {}),
+      ...(key === 'vehicle_series' ? { vehicle_package: '' } : {}),
+      ...(key === 'moto_brand' ? { moto_model: '', moto_series: '', moto_package: '' } : {}),
+      ...(key === 'moto_model' ? { moto_series: '', moto_package: '' } : {}),
+      ...(key === 'moto_series' ? { moto_package: '' } : {}),
     }))
   }
 
@@ -171,11 +336,33 @@ export default function CreateListingPage() {
     setFiles((current) => [...current, ...selected].slice(0, 10))
   }
 
+  const setGenericLevel = (level: number, value: string) => {
+    setGenericSelections((current) => {
+      const next = current.slice(0, level)
+      if (value) next[level] = value
+      return next
+    })
+  }
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user) return router.push('/giris')
     setSaving(true)
     try {
+      const vehicleLabels = [form.vehicle_brand, form.vehicle_model, form.vehicle_series, form.vehicle_package].filter(Boolean)
+      const vehiclePath = [selectedVehicleBrand, selectedVehicleModel, selectedVehicleSeries, selectedVehiclePackage]
+        .filter(Boolean)
+        .map((item: any) => item.id)
+      const motorLabels = [form.moto_brand, form.moto_model, form.moto_series, form.moto_package].filter(Boolean)
+      const motorPath = [selectedMotorBrand, selectedMotorModel, selectedMotorSeries, selectedMotorPackage]
+        .filter(Boolean)
+        .map((item: any) => item.id)
+      const genericLabels = genericSelections.filter(Boolean)
+      const hierarchyLabels =
+        selectedCategory?.slug === 'arac' ? vehicleLabels : selectedCategory?.slug === 'motor' ? motorLabels : genericLabels
+      const hierarchyPath =
+        selectedCategory?.slug === 'arac' ? vehiclePath : selectedCategory?.slug === 'motor' ? motorPath : genericNodePath.map((item) => item.id)
+
       const payload: any = {
         category_id: Number(form.category_id),
         sub_category_id: form.sub_category_id ? Number(form.sub_category_id) : undefined,
@@ -185,18 +372,39 @@ export default function CreateListingPage() {
         condition: form.condition,
         city: form.city,
         district: form.district,
+        hierarchy_group: selectedHierarchyGroup || undefined,
+        hierarchy_labels: hierarchyLabels,
+        hierarchy_path: hierarchyPath,
       }
 
       if (selectedCategory?.slug === 'arac') {
         payload.vehicle_details = {
           brand: form.vehicle_brand,
           model: form.vehicle_model,
+          series: form.vehicle_series,
+          package_name: form.vehicle_package,
+          trim_name: form.vehicle_type_name || form.vehicle_package || form.vehicle_series,
+          type_name: form.vehicle_type_name || form.vehicle_package || undefined,
           year: Number(form.vehicle_year) || undefined,
           mileage: Number(form.vehicle_mileage) || undefined,
           fuel_type: form.fuel_type,
           transmission: form.transmission,
           body_type: form.body_type,
+          drive_type: form.drive_type,
           color: form.color,
+          has_warranty: form.has_warranty === 'true',
+          warranty_remaining: form.warranty_remaining || undefined,
+          has_lpg: form.has_lpg === 'true',
+          has_damage_record: form.has_damage_record === 'true',
+          tramer_record: form.tramer_record,
+          lien_pledge_status: form.lien_pledge_status,
+          plate_type: form.plate_type,
+          plate_number: form.plate_number || undefined,
+          chassis_last6: form.chassis_last6 || undefined,
+          trade_in: form.trade_in === 'true',
+          legal_brand: form.legal_brand || form.vehicle_brand || undefined,
+          commercial_name: form.commercial_name || form.vehicle_type_name || form.vehicle_model || undefined,
+          legal_model_year: Number(form.legal_model_year || form.vehicle_year) || undefined,
         }
       }
 
@@ -204,6 +412,9 @@ export default function CreateListingPage() {
         payload.motorcycle_details = {
           brand: form.moto_brand,
           model: form.moto_model,
+          series: form.moto_series,
+          package_name: form.moto_package,
+          trim_name: form.moto_package || form.moto_series,
           year: Number(form.moto_year) || undefined,
           mileage: Number(form.moto_mileage) || undefined,
           engine_cc: Number(form.engine_cc) || undefined,
@@ -299,6 +510,31 @@ export default function CreateListingPage() {
           </div>
         )}
 
+        {selectedCategory && !['arac', 'motor'].includes(selectedCategory.slug) && (
+          <div className="bg-gray-50 rounded-xl p-4 grid md:grid-cols-2 gap-3">
+            <div className="md:col-span-2">
+              <h2 className="font-bold">{selectedCategory.name} Detayları</h2>
+              <p className="mt-1 text-xs font-semibold text-gray-500">
+                Seçenekler admin panelindeki hiyerarşi ağacından gelir.
+              </p>
+            </div>
+            {hierarchyLoading && <div className="md:col-span-2 text-sm text-gray-500">Seçenekler yükleniyor...</div>}
+            {!hierarchyLoading &&
+              genericLevels.map((levelOptions, level) => (
+                <Select
+                  key={`${selectedHierarchyGroup}-${level}`}
+                  label={getLevelLabel(selectedHierarchyGroup, level)}
+                  value={genericSelections[level] || ''}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setGenericLevel(level, e.target.value)}
+                  options={[
+                    ['', `${getLevelLabel(selectedHierarchyGroup, level)} seç`],
+                    ...levelOptions.map((item) => [item.label, item.label]),
+                  ]}
+                />
+              ))}
+          </div>
+        )}
+
         <div className="grid md:grid-cols-3 gap-3">
           <div>
             <label className="label">Durum</label>
@@ -342,21 +578,55 @@ export default function CreateListingPage() {
               label="Marka"
               value={form.vehicle_brand}
               onChange={set('vehicle_brand')}
-              options={[['', 'Marka seç'], ...Object.keys(VEHICLE_BRANDS).map((brand) => [brand, brand])]}
+              required
+              options={[['', 'Marka seç'], ...vehicleTree.map((brand) => [brand.label, brand.label])]}
             />
             <Select
               label="Model"
               value={form.vehicle_model}
               onChange={set('vehicle_model')}
               disabled={!form.vehicle_brand}
-              options={[['', form.vehicle_brand ? 'Model seç' : 'Önce marka seç'], ...vehicleModels.map((model) => [model, model])]}
+              required
+              options={[['', form.vehicle_brand ? 'Model seç' : 'Önce marka seç'], ...vehicleModels.map((model) => [model.label, model.label])]}
             />
+            {!!vehicleSeries.length && (
+              <Select
+                label="Seri / Donanım"
+                value={form.vehicle_series}
+                onChange={set('vehicle_series')}
+                options={[['', 'Seri seç'], ...vehicleSeries.map((item) => [item.label, item.label])]}
+              />
+            )}
+            {!!vehiclePackages.length && (
+              <Select
+                label="Paket"
+                value={form.vehicle_package}
+                onChange={set('vehicle_package')}
+                options={[['', 'Paket seç'], ...vehiclePackages.map((item) => [item.label, item.label])]}
+              />
+            )}
+            <Field label="Tip / Versiyon" value={form.vehicle_type_name} onChange={set('vehicle_type_name')} placeholder="ALBEA 1.6 DYNAMIC" />
             <Field label="Yıl" value={form.vehicle_year} onChange={set('vehicle_year')} type="number" />
             <Field label="KM" value={form.vehicle_mileage} onChange={set('vehicle_mileage')} type="number" />
             <Select label="Yakıt" value={form.fuel_type} onChange={set('fuel_type')} options={FUEL_TYPES} />
             <Select label="Vites" value={form.transmission} onChange={set('transmission')} options={[['automatic', 'Otomatik'], ['manual', 'Manuel'], ['semi_automatic', 'Yarı Otomatik']]} />
-            <Select label="Kasa" value={form.body_type} onChange={set('body_type')} options={['sedan', 'hatchback', 'suv', 'coupe', 'wagon', 'van', 'pickup'].map((x) => [x, x])} />
+            <Select label="Kasa" value={form.body_type} onChange={set('body_type')} options={BODY_TYPES} />
+            <Select label="Çekiş" value={form.drive_type} onChange={set('drive_type')} options={DRIVE_TYPES} />
             <Field label="Renk" value={form.color} onChange={set('color')} />
+            <Select label="Garanti" value={form.has_warranty} onChange={set('has_warranty')} options={YES_NO} />
+            <Field label="Kalan Garanti Süresi / KM" value={form.warranty_remaining} onChange={set('warranty_remaining')} placeholder="12 ay / 20.000 km" />
+            <Select label="LPG" value={form.has_lpg} onChange={set('has_lpg')} options={YES_NO} />
+            <Select label="Ağır Hasar Kayıtlı" value={form.has_damage_record} onChange={set('has_damage_record')} options={YES_NO} />
+            <Select label="Hasar / Tramer Kaydı" value={form.tramer_record} onChange={set('tramer_record')} options={[['false', 'Yok'], ['true', 'Var'], ['unknown', 'Bilinmiyor']]} />
+            <Select label="Rehin & Haciz Durumu" value={form.lien_pledge_status} onChange={set('lien_pledge_status')} options={[['none', 'Yok'], ['exists', 'Var'], ['unknown', 'Bilinmiyor']]} />
+            <Select label="Plaka Tipi" value={form.plate_type} onChange={set('plate_type')} options={PLATE_TYPES} />
+            <Field label="Plaka" value={form.plate_number} onChange={set('plate_number')} placeholder="59 AHJ 816" />
+            <Field label="Şasi No (Son 6 Hane)" value={form.chassis_last6} onChange={set('chassis_last6')} maxLength={6} placeholder="416627" />
+            <Select label="Takas Durumu" value={form.trade_in} onChange={set('trade_in')} options={YES_NO} />
+            <h3 className="mt-2 font-bold md:col-span-2">Araç Yasal Bilgileri</h3>
+            <Field label="Marka Adı" value={form.legal_brand} onChange={set('legal_brand')} placeholder={form.vehicle_brand || 'FIAT'} />
+            <Field label="Ticari Adı" value={form.commercial_name} onChange={set('commercial_name')} placeholder="ALBEA 1.6" />
+            <Field label="Model Yılı" value={form.legal_model_year} onChange={set('legal_model_year')} type="number" placeholder={form.vehicle_year || '2006'} />
           </div>
         )}
 
@@ -367,15 +637,33 @@ export default function CreateListingPage() {
               label="Marka"
               value={form.moto_brand}
               onChange={set('moto_brand')}
-              options={[['', 'Marka seç'], ...Object.keys(MOTOR_BRANDS).map((brand) => [brand, brand])]}
+              required
+              options={[['', 'Marka seç'], ...motorTree.map((brand) => [brand.label, brand.label])]}
             />
             <Select
               label="Model"
               value={form.moto_model}
               onChange={set('moto_model')}
               disabled={!form.moto_brand}
-              options={[['', form.moto_brand ? 'Model seç' : 'Önce marka seç'], ...motoModels.map((model) => [model, model])]}
+              required
+              options={[['', form.moto_brand ? 'Model seç' : 'Önce marka seç'], ...motoModels.map((model) => [model.label, model.label])]}
             />
+            {!!motoSeries.length && (
+              <Select
+                label="Seri / Donanım"
+                value={form.moto_series}
+                onChange={set('moto_series')}
+                options={[['', 'Seri seç'], ...motoSeries.map((item) => [item.label, item.label])]}
+              />
+            )}
+            {!!motoPackages.length && (
+              <Select
+                label="Paket"
+                value={form.moto_package}
+                onChange={set('moto_package')}
+                options={[['', 'Paket seç'], ...motoPackages.map((item) => [item.label, item.label])]}
+              />
+            )}
             <Field label="Yıl" value={form.moto_year} onChange={set('moto_year')} type="number" />
             <Field label="KM" value={form.moto_mileage} onChange={set('moto_mileage')} type="number" />
             <Field label="Motor Hacmi" value={form.engine_cc} onChange={set('engine_cc')} type="number" />

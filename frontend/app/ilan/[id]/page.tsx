@@ -15,6 +15,39 @@ function timeAgo(d: string) {
   return `${Math.floor(h / 24)} gün önce`
 }
 
+const yesNo = (value: any) => (value ? 'Evet' : 'Hayır')
+
+const vehicleOptionLabel = (value?: string | null) => {
+  const labels: Record<string, string> = {
+    gasoline: 'Benzin',
+    diesel: 'Dizel',
+    lpg: 'LPG',
+    electric: 'Elektrik',
+    hybrid: 'Hibrit',
+    automatic: 'Otomatik',
+    manual: 'Manuel',
+    semi_automatic: 'Yarı Otomatik',
+    front: 'Önden Çekiş',
+    rear: 'Arkadan İtiş',
+    awd: '4x4 / AWD',
+    sedan: 'Sedan',
+    hatchback: 'Hatchback',
+    suv: 'SUV',
+    coupe: 'Coupe',
+    wagon: 'Station Wagon',
+    van: 'Van',
+    pickup: 'Pickup',
+    tr: 'TR Plaka',
+    foreign: 'Yabancı Plaka',
+    none: 'Yok',
+    exists: 'Var',
+    unknown: 'Bilinmiyor',
+    true: 'Var',
+    false: 'Yok',
+  }
+  return value ? labels[value] || value : value
+}
+
 export default function ListingDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
@@ -222,6 +255,19 @@ export default function ListingDetailPage() {
             </div>
           </div>
 
+          {!!listing.hierarchy_labels?.length && (
+            <div className="card p-5">
+              <h2 className="font-bold text-gray-800 mb-3">Kategori Detayı</h2>
+              <div className="flex flex-wrap gap-2">
+                {listing.hierarchy_labels.map((label: string, index: number) => (
+                  <span key={`${label}-${index}`} className="rounded-full bg-brand-light px-3 py-1.5 text-xs font-black text-brand">
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {listing.vehicle_details && (
             <div className="card p-5">
               <h2 className="font-bold text-gray-800 mb-3">Araç Bilgileri</h2>
@@ -229,12 +275,54 @@ export default function ListingDetailPage() {
                 {[
                   ['Marka', listing.vehicle_details.brand],
                   ['Model', listing.vehicle_details.model],
+                  ['Seri', listing.vehicle_details.series],
+                  ['Paket', listing.vehicle_details.package_name],
+                  ['Tip', listing.vehicle_details.type_name || listing.vehicle_details.trim_name],
                   ['Yıl', listing.vehicle_details.year],
                   ['KM', listing.vehicle_details.mileage?.toLocaleString('tr-TR')],
-                  ['Yakıt', listing.vehicle_details.fuel_type],
-                  ['Vites', listing.vehicle_details.transmission],
-                  ['Kasa', listing.vehicle_details.body_type],
+                  ['Yakıt Tipi', vehicleOptionLabel(listing.vehicle_details.fuel_type)],
+                  ['Vites Tipi', vehicleOptionLabel(listing.vehicle_details.transmission)],
+                  ['Kasa Tipi', vehicleOptionLabel(listing.vehicle_details.body_type)],
+                  ['Çekiş', vehicleOptionLabel(listing.vehicle_details.drive_type)],
                   ['Renk', listing.vehicle_details.color],
+                  ['Garanti', yesNo(listing.vehicle_details.has_warranty)],
+                  ['Kalan Garanti Süresi / KM Sayısı', listing.vehicle_details.warranty_remaining],
+                  ['Ağır Hasar Kayıtlı', yesNo(listing.vehicle_details.has_damage_record)],
+                  ['LPG', yesNo(listing.vehicle_details.has_lpg)],
+                  ['Plaka Tipi', vehicleOptionLabel(listing.vehicle_details.plate_type)],
+                  ['Takas Durumu', yesNo(listing.vehicle_details.trade_in)],
+                  ['Plaka', listing.vehicle_details.plate_number],
+                  ['Şasi No (Son 6 Hanesi)', listing.vehicle_details.chassis_last6],
+                  ['Hasar / Tramer Kaydı', vehicleOptionLabel(listing.vehicle_details.tramer_record)],
+                  ['Rehin & Haciz Durumu', vehicleOptionLabel(listing.vehicle_details.lien_pledge_status)],
+                  ['Marka Adı', listing.vehicle_details.legal_brand],
+                  ['Ticari Adı', listing.vehicle_details.commercial_name],
+                  ['Model Yılı', listing.vehicle_details.legal_model_year],
+                ]
+                  .filter(([, v]) => v)
+                  .map(([k, v]) => (
+                    <div key={k} className="bg-gray-50 rounded-lg px-3 py-2.5">
+                      <p className="text-[11px] text-gray-400 font-medium">{k}</p>
+                      <p className="text-sm font-semibold text-gray-800 capitalize">{String(v)}</p>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {listing.motorcycle_details && (
+            <div className="card p-5">
+              <h2 className="font-bold text-gray-800 mb-3">Motor Bilgileri</h2>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  ['Marka', listing.motorcycle_details.brand],
+                  ['Model', listing.motorcycle_details.model],
+                  ['Seri', listing.motorcycle_details.series],
+                  ['Paket', listing.motorcycle_details.package_name],
+                  ['Yıl', listing.motorcycle_details.year],
+                  ['KM', listing.motorcycle_details.mileage?.toLocaleString('tr-TR')],
+                  ['Motor Hacmi', listing.motorcycle_details.engine_cc && `${listing.motorcycle_details.engine_cc} cc`],
+                  ['Renk', listing.motorcycle_details.color],
                 ]
                   .filter(([, v]) => v)
                   .map(([k, v]) => (

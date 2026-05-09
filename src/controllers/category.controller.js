@@ -1,4 +1,5 @@
 const { query } = require('../config/database');
+const multer = require('multer');
 
 const DEFAULT_CATEGORIES = [
   { name: 'Araç', slug: 'arac', icon: '🚗', sort_order: 1 },
@@ -40,6 +41,92 @@ const makeSlug = (value) =>
     .replace(/ç/g, 'c')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+
+const uploadCsv = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+});
+
+const parseCsvLine = (line) => {
+  const result = [];
+  let value = '';
+  let quoted = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+    if (char === '"' && quoted && next === '"') {
+      value += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === ',' && !quoted) {
+      result.push(value.trim());
+      value = '';
+    } else {
+      value += char;
+    }
+  }
+
+  result.push(value.trim());
+  return result;
+};
+
+const upsertCategory = async ({ parentId = null, name, slug, icon = null, sortOrder = 0 }) => {
+  const cleanName = String(name || '').trim();
+  const normalizedSlug = makeSlug(slug || cleanName);
+  if (!cleanName || !normalizedSlug) return null;
+
+  const { rows } = await query(
+    `INSERT INTO categories (parent_id, name, slug, icon, sort_order, is_active)
+     VALUES ($1,$2,$3,$4,$5,TRUE)
+     ON CONFLICT (slug) DO UPDATE SET
+       parent_id = EXCLUDED.parent_id,
+       name = EXCLUDED.name,
+       icon = COALESCE(EXCLUDED.icon, categories.icon),
+       sort_order = EXCLUDED.sort_order,
+       is_active = TRUE
+     RETURNING *`,
+    [parentId, cleanName, normalizedSlug, icon || null, Number(sortOrder || 0)],
+  );
+  return rows[0];
+};
+
+const parseCategoryCsv = (csv) => {
+  const lines = String(csv || '')
+    .replace(/^\uFEFF/, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) return [];
+
+  const first = parseCsvLine(lines[0]).map((item) => makeSlug(item));
+  const hasHeader = first.some((item) => ['path', 'kategori', 'ana-kategori', 'parent', 'name', 'slug'].includes(item));
+  const header = hasHeader ? first : [];
+  const dataLines = hasHeader ? lines.slice(1) : lines;
+
+  return dataLines
+    .map((line) => {
+      const columns = parseCsvLine(line);
+      if (header.includes('path')) {
+        return { path: String(columns[header.indexOf('path')] || '').split('>').map((item) => item.trim()).filter(Boolean) };
+      }
+
+      if (header.length) {
+        const parent = columns[header.findIndex((item) => ['ana-kategori', 'parent', 'kategori'].includes(item))] || '';
+        const name = columns[header.findIndex((item) => ['alt-kategori', 'name', 'ad'].includes(item))] || columns[0] || '';
+        const slug = header.includes('slug') ? columns[header.indexOf('slug')] : '';
+        const icon = header.includes('icon') ? columns[header.indexOf('icon')] : '';
+        const sortOrder = header.includes('sort-order') ? columns[header.indexOf('sort-order')] : 0;
+        return parent ? { path: [parent, name], slug, icon, sortOrder } : { path: [name], slug, icon, sortOrder };
+      }
+
+      if (columns.length === 1) return { path: columns[0].split('>').map((item) => item.trim()).filter(Boolean) };
+      return { path: columns.filter(Boolean) };
+    })
+    .filter((row) => row.path?.length);
+};
 
 const ensureDefaultCategories = async () => {
   for (const category of DEFAULT_CATEGORIES) {
@@ -177,4 +264,41 @@ const deleteCategory = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getCategories, getCategory, createCategory, updateCategory, deleteCategory };
+const importCsv = async (req, res, next) => {
+  try {
+    const csv = req.file ? req.file.buffer.toString('utf8') : req.body.csv;
+    const rows = parseCategoryCsv(csv);
+    if (!rows.length) {
+      return res.status(422).json({ success: false, message: 'CSV içinde aktarılacak kategori bulunamadı.' });
+    }
+
+    let imported = 0;
+    for (const [rowIndex, row] of rows.entries()) {
+      let parentId = null;
+      for (const [pathIndex, label] of row.path.entries()) {
+        const node = await upsertCategory({
+          parentId,
+          name: label,
+          slug: pathIndex === row.path.length - 1 ? row.slug : undefined,
+          icon: pathIndex === 0 ? row.icon : null,
+          sortOrder: row.sortOrder || rowIndex * 10 + pathIndex,
+        });
+        if (!node) continue;
+        parentId = node.id;
+        imported += 1;
+      }
+    }
+
+    res.json({ success: true, message: 'Kategori CSV aktarıldı.', data: { rows: rows.length, imported } });
+  } catch (err) { next(err); }
+};
+
+module.exports = {
+  uploadCsv,
+  getCategories,
+  getCategory,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  importCsv,
+};

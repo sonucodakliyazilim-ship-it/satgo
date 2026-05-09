@@ -133,6 +133,11 @@ CREATE TABLE listings (
   latitude        NUMERIC(10,8),
   longitude       NUMERIC(11,8),
 
+  -- Dynamic category hierarchy selected while creating the listing
+  hierarchy_group  VARCHAR(80),
+  hierarchy_path   TEXT[] NOT NULL DEFAULT '{}',
+  hierarchy_labels TEXT[] NOT NULL DEFAULT '{}',
+
   -- Promotion flags (denormalized for query performance)
   is_featured     BOOLEAN DEFAULT FALSE,
   is_urgent       BOOLEAN DEFAULT FALSE,
@@ -162,6 +167,7 @@ CREATE INDEX idx_listings_status ON listings(status);
 CREATE INDEX idx_listings_city ON listings(city);
 CREATE INDEX idx_listings_price ON listings(price);
 CREATE INDEX idx_listings_created ON listings(created_at DESC);
+CREATE INDEX idx_listings_hierarchy_group ON listings(hierarchy_group);
 CREATE INDEX idx_listings_featured ON listings(is_featured) WHERE is_featured = TRUE;
 CREATE INDEX idx_listings_showcase ON listings(is_showcase) WHERE is_showcase = TRUE;
 -- Full text search index
@@ -198,14 +204,30 @@ CREATE TABLE vehicle_details (
   transmission    transmission_type,
   body_type       body_type,
   color           VARCHAR(50),
+  drive_type      VARCHAR(40),
+  type_name       VARCHAR(120),
   engine_cc       SMALLINT,         -- engine displacement cm3
   horse_power     SMALLINT,
   doors           SMALLINT,
   seats           SMALLINT,
+  has_warranty    BOOLEAN DEFAULT FALSE,
+  warranty_remaining VARCHAR(120),
+  has_lpg         BOOLEAN DEFAULT FALSE,
   has_damage_record BOOLEAN DEFAULT FALSE,
+  tramer_record   VARCHAR(40),
+  lien_pledge_status VARCHAR(40),
   damage_detail   TEXT,
   trade_in        BOOLEAN DEFAULT FALSE,
   plate_city      VARCHAR(10),      -- '34 İstanbul'
+  plate_type      VARCHAR(40),
+  plate_number    VARCHAR(20),
+  chassis_last6   VARCHAR(6),
+  legal_brand     VARCHAR(100),
+  commercial_name VARCHAR(120),
+  legal_model_year SMALLINT,
+  series          VARCHAR(100),
+  package_name    VARCHAR(100),
+  trim_name       VARCHAR(100),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

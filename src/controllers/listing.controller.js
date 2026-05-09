@@ -5,6 +5,11 @@ const { refreshExpiredPromotions } = require('../services/promotion.service');
 
 const LISTINGS_PER_PAGE = 20;
 
+const cleanStringArray = (value) => {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item || '').trim()).filter(Boolean);
+};
+
 const buildListingQuery = ({ category, city, district, minPrice, maxPrice, search,
   sortBy, status, userId, featured, urgent, showcase, preferredCity, preferredDistrict, page = 1 }) => {
 
@@ -174,16 +179,22 @@ const createListing = async (req, res, next) => {
     const {
       category_id, sub_category_id, title, description, price, price_negotiable,
       condition, city, district, neighborhood, latitude, longitude,
+      hierarchy_group, hierarchy_path, hierarchy_labels,
       vehicle_details, motorcycle_details, real_estate_details,
     } = req.body;
+
+    const cleanHierarchyPath = cleanStringArray(hierarchy_path);
+    const cleanHierarchyLabels = cleanStringArray(hierarchy_labels);
+    const cleanHierarchyGroup = hierarchy_group ? String(hierarchy_group).trim() : null;
 
     const result = await withTransaction(async (client) => {
       // Create listing
       const { rows } = await client.query(
         `INSERT INTO listings
           (user_id, category_id, sub_category_id, title, description, price,
-           price_negotiable, condition, city, district, neighborhood, latitude, longitude, status, approved_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'active',NOW())
+           price_negotiable, condition, city, district, neighborhood, latitude, longitude,
+           hierarchy_group, hierarchy_path, hierarchy_labels, status, approved_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'active',NOW())
          RETURNING *`,
         [
           req.user.id, category_id, sub_category_id || null,
@@ -191,6 +202,7 @@ const createListing = async (req, res, next) => {
           price_negotiable || false, condition || 'good',
           city || null, district || null, neighborhood || null,
           latitude || null, longitude || null,
+          cleanHierarchyGroup, cleanHierarchyPath, cleanHierarchyLabels,
         ]
       );
       const listing = rows[0];
@@ -202,12 +214,20 @@ const createListing = async (req, res, next) => {
           `INSERT INTO vehicle_details
             (listing_id, brand, model, year, mileage, fuel_type, transmission,
              body_type, color, engine_cc, horse_power, doors, seats,
-             has_damage_record, damage_detail, trade_in, plate_city)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+             has_damage_record, damage_detail, trade_in, plate_city, series, package_name, trim_name,
+             drive_type, type_name, has_warranty, warranty_remaining, has_lpg, tramer_record,
+             lien_pledge_status, plate_type, plate_number, chassis_last6, legal_brand, commercial_name, legal_model_year)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)`,
           [listing.id, v.brand, v.model, v.year, v.mileage, v.fuel_type,
            v.transmission, v.body_type, v.color, v.engine_cc, v.horse_power,
            v.doors, v.seats, v.has_damage_record || false,
-           v.damage_detail || null, v.trade_in || false, v.plate_city || null]
+           v.damage_detail || null, v.trade_in || false, v.plate_city || null,
+           v.series || null, v.package_name || null, v.trim_name || null,
+           v.drive_type || null, v.type_name || null, v.has_warranty || false,
+           v.warranty_remaining || null, v.has_lpg || false, v.tramer_record || null,
+           v.lien_pledge_status || null, v.plate_type || null, v.plate_number || null,
+           v.chassis_last6 || null, v.legal_brand || null, v.commercial_name || null,
+           v.legal_model_year || null]
         );
       }
 
@@ -215,10 +235,11 @@ const createListing = async (req, res, next) => {
         const m = motorcycle_details;
         await client.query(
           `INSERT INTO motorcycle_details
-            (listing_id, brand, model, year, mileage, engine_cc, license_class, color, condition_detail, trade_in)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            (listing_id, brand, model, year, mileage, engine_cc, license_class, color, condition_detail, trade_in, series, package_name, trim_name)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
           [listing.id, m.brand, m.model, m.year, m.mileage, m.engine_cc,
-           m.license_class || null, m.color || null, m.condition_detail || null, m.trade_in || false]
+           m.license_class || null, m.color || null, m.condition_detail || null, m.trade_in || false,
+           m.series || null, m.package_name || null, m.trim_name || null]
         );
       }
 
@@ -262,8 +283,15 @@ const updateListing = async (req, res, next) => {
     const {
       title, description, price, price_negotiable, condition,
       city, district, neighborhood,
+      hierarchy_group, hierarchy_path, hierarchy_labels,
       vehicle_details, motorcycle_details, real_estate_details,
     } = req.body;
+
+    const hasHierarchyPath = Object.prototype.hasOwnProperty.call(req.body, 'hierarchy_path');
+    const hasHierarchyLabels = Object.prototype.hasOwnProperty.call(req.body, 'hierarchy_labels');
+    const cleanHierarchyPath = cleanStringArray(hierarchy_path);
+    const cleanHierarchyLabels = cleanStringArray(hierarchy_labels);
+    const cleanHierarchyGroup = hierarchy_group === undefined ? undefined : String(hierarchy_group || '').trim() || null;
 
     await withTransaction(async (client) => {
       await client.query(
@@ -276,22 +304,60 @@ const updateListing = async (req, res, next) => {
            city = COALESCE($6, city),
            district = COALESCE($7, district),
            neighborhood = COALESCE($8, neighborhood),
+           hierarchy_group = COALESCE($9, hierarchy_group),
+           hierarchy_path = CASE WHEN $10 THEN $11 ELSE hierarchy_path END,
+           hierarchy_labels = CASE WHEN $12 THEN $13 ELSE hierarchy_labels END,
            updated_at = NOW()
-         WHERE id = $9`,
-        [title, description, price, price_negotiable, condition, city, district, neighborhood, id]
+         WHERE id = $14`,
+        [
+          title, description, price, price_negotiable, condition, city, district, neighborhood,
+          cleanHierarchyGroup,
+          hasHierarchyPath, cleanHierarchyPath,
+          hasHierarchyLabels, cleanHierarchyLabels,
+          id,
+        ]
       );
 
       if (vehicle_details) {
         const v = vehicle_details;
         await client.query(
           `INSERT INTO vehicle_details
-             (listing_id, brand, model, year, mileage, fuel_type, transmission, body_type, color, engine_cc, trade_in)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+             (listing_id, brand, model, year, mileage, fuel_type, transmission, body_type, color, engine_cc,
+              trade_in, series, package_name, trim_name, drive_type, type_name, has_warranty,
+              warranty_remaining, has_lpg, has_damage_record, tramer_record, lien_pledge_status,
+              plate_type, plate_number, chassis_last6, legal_brand, commercial_name, legal_model_year)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
            ON CONFLICT (listing_id) DO UPDATE SET
              brand=$2, model=$3, year=$4, mileage=$5, fuel_type=$6,
-             transmission=$7, body_type=$8, color=$9, engine_cc=$10, trade_in=$11`,
+             transmission=$7, body_type=$8, color=$9, engine_cc=$10, trade_in=$11,
+             series=$12, package_name=$13, trim_name=$14, drive_type=$15, type_name=$16,
+             has_warranty=$17, warranty_remaining=$18, has_lpg=$19, has_damage_record=$20,
+             tramer_record=$21, lien_pledge_status=$22, plate_type=$23, plate_number=$24,
+             chassis_last6=$25, legal_brand=$26, commercial_name=$27, legal_model_year=$28`,
           [id, v.brand, v.model, v.year, v.mileage, v.fuel_type,
-           v.transmission, v.body_type, v.color, v.engine_cc, v.trade_in || false]
+           v.transmission, v.body_type, v.color, v.engine_cc, v.trade_in || false,
+           v.series || null, v.package_name || null, v.trim_name || null,
+           v.drive_type || null, v.type_name || null, v.has_warranty || false,
+           v.warranty_remaining || null, v.has_lpg || false, v.has_damage_record || false,
+           v.tramer_record || null, v.lien_pledge_status || null, v.plate_type || null,
+           v.plate_number || null, v.chassis_last6 || null, v.legal_brand || null,
+           v.commercial_name || null, v.legal_model_year || null]
+        );
+      }
+
+      if (motorcycle_details) {
+        const m = motorcycle_details;
+        await client.query(
+          `INSERT INTO motorcycle_details
+             (listing_id, brand, model, year, mileage, engine_cc, license_class, color, condition_detail, trade_in, series, package_name, trim_name)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+           ON CONFLICT (listing_id) DO UPDATE SET
+             brand=$2, model=$3, year=$4, mileage=$5, engine_cc=$6,
+             license_class=$7, color=$8, condition_detail=$9, trade_in=$10,
+             series=$11, package_name=$12, trim_name=$13`,
+          [id, m.brand, m.model, m.year, m.mileage, m.engine_cc,
+           m.license_class || null, m.color || null, m.condition_detail || null,
+           m.trade_in || false, m.series || null, m.package_name || null, m.trim_name || null]
         );
       }
 

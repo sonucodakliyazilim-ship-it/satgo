@@ -21,9 +21,23 @@ import ListingCard from '@/components/listings/ListingCard'
 const fallbackBanners = [
   {
     id: 'fallback-main',
-    title: 'Fiyatlar karşına dikildiyse, uygununu Satgo’da bul.',
-    subtitle: 'Telefon, araç, elektronik ve ev yaşam ürünlerinde temiz ikinci el fırsatlar.',
+    title: 'Satgo’da temiz ilan, hızlı alıcı.',
+    subtitle: 'Araçtan elektroniğe, güven veren ilanları şehir ve kategoriye göre keşfet.',
     href: '/ilanlar',
+    image_url: '/satgo-logo.jpeg',
+  },
+  {
+    id: 'fallback-vehicle',
+    title: 'Araç ilanlarında marka, model, paket seçimi hazır.',
+    subtitle: 'BMW X5 xDrive gibi net filtrelerle doğru alıcıya daha hızlı ulaş.',
+    href: '/ilanlar?kategori=arac',
+    image_url: '/satgo-logo.jpeg',
+  },
+  {
+    id: 'fallback-sell',
+    title: 'İlanını dakikalar içinde yayına hazırla.',
+    subtitle: 'Fotoğrafını ekle, kategorini seç, ilanını vitrine taşı.',
+    href: '/ilan-ver',
     image_url: '/satgo-logo.jpeg',
   },
 ]
@@ -119,6 +133,7 @@ export default function HomePage() {
 
   const hero = banners[0] || fallbackBanners[0]
   const heroImage = mediaUrl(hero.image_url)
+  const secondaryBanners = banners.slice(1, 3)
   const visibleSections = useMemo(
     () => listingSections.filter((section) => section.listings.length),
     [listingSections],
@@ -127,6 +142,7 @@ export default function HomePage() {
   return (
     <main className="bg-white pb-10">
       <section className="mx-auto max-w-6xl px-3 pt-4 sm:px-4 sm:pt-5">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)]">
         <Link
           href={hero.href || '/ilanlar'}
           className="group relative block min-h-[210px] overflow-hidden rounded-lg bg-[#8f35e5] text-white shadow-sm sm:min-h-[280px]"
@@ -158,12 +174,40 @@ export default function HomePage() {
               Keşfet
             </span>
           </div>
-          <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 gap-1.5">
-            {[...Array(9)].map((_, index) => (
-              <span key={index} className={`h-2 rounded-full bg-white/60 ${index === 4 ? 'w-6 bg-white' : 'w-2'}`} />
-            ))}
-          </div>
         </Link>
+        {!!secondaryBanners.length && (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            {secondaryBanners.map((banner, index) => {
+              const bannerImage = mediaUrl(banner.image_url)
+              return (
+                <Link
+                  key={banner.id}
+                  href={banner.href || '/ilanlar'}
+                  className={`group relative min-h-[132px] overflow-hidden rounded-lg text-white shadow-sm ${
+                    index === 0 ? 'bg-gray-950' : 'bg-brand-dark'
+                  }`}
+                >
+                  {bannerImage && (
+                    <img
+                      src={bannerImage}
+                      alt={banner.title}
+                      className="absolute inset-0 h-full w-full object-cover opacity-25 transition-transform duration-500 group-hover:scale-105"
+                    />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-r from-black/75 to-black/25" />
+                  <div className="relative flex min-h-[132px] flex-col justify-center p-4">
+                    <p className="text-[11px] font-black uppercase tracking-[0.16em] text-white/70">
+                      {index === 0 ? 'Araç vitrini' : 'Hızlı satış'}
+                    </p>
+                    <h2 className="mt-2 text-lg font-black leading-tight">{banner.title}</h2>
+                    {banner.subtitle && <p className="mt-2 line-clamp-2 text-xs font-semibold text-white/75">{banner.subtitle}</p>}
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        )}
+        </div>
       </section>
 
       <section className="mx-auto max-w-6xl px-3 pt-4 sm:px-4">
