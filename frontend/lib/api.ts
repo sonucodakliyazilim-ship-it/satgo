@@ -141,6 +141,7 @@ export const authApi = {
 
 export const listingsApi = {
   getAll: (params?: any) => api.get('/listings', { params }),
+  getHomeSections: () => api.get('/listings/home-sections'),
   getMine: (params?: any) => api.get('/listings/me', { params }),
   getOne: (id: string) => api.get(`/listings/${id}`),
   create: (d: any) => api.post('/listings', d),

@@ -90,10 +90,178 @@ const DEFAULT_PATHS = {
   ],
 };
 
+const VEHICLE_BRANDS = {
+  Abarth: ['595', '695', 'Punto'],
+  'Alfa Romeo': ['Giulietta', 'Giulia', 'Stelvio', 'Tonale', 'MiTo', '156', '159'],
+  Anadol: ['A1', 'A2', 'A4', 'STC-16'],
+  'Aston Martin': ['DB11', 'DB12', 'Vantage', 'DBX'],
+  Audi: ['A1', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'Q2', 'Q3', 'Q5', 'Q7', 'Q8', 'e-tron', 'TT'],
+  Bentley: ['Continental', 'Flying Spur', 'Bentayga'],
+  BMW: ['116i', '118i', '120i', '216d', '218i', '320i', '320d', '418i', '420i', '520i', '520d', '530i', 'X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'i3', 'i4', 'i5', 'iX'],
+  BYD: ['Atto 3', 'Dolphin', 'Seal', 'Tang', 'Han'],
+  Cadillac: ['Escalade', 'CTS', 'SRX', 'XT5'],
+  Chery: ['Tiggo 4 Pro', 'Tiggo 7 Pro', 'Tiggo 8 Pro', 'Omoda 5', 'Arrizo 8'],
+  Chevrolet: ['Aveo', 'Cruze', 'Captiva', 'Spark', 'Lacetti', 'Epica', 'Kalos'],
+  Citroen: ['C-Elysee', 'C3', 'C3 Aircross', 'C4', 'C4 X', 'C5 Aircross', 'Berlingo', 'Jumpy'],
+  Cupra: ['Formentor', 'Leon', 'Ateca', 'Born'],
+  Dacia: ['Sandero', 'Sandero Stepway', 'Logan', 'Duster', 'Jogger', 'Lodgy', 'Dokker'],
+  Daewoo: ['Lanos', 'Nubira', 'Matiz', 'Espero'],
+  Daihatsu: ['Terios', 'Sirion', 'Cuore', 'Materia'],
+  Dodge: ['Caliber', 'Journey', 'Nitro', 'Charger'],
+  DS: ['DS 3', 'DS 4', 'DS 7', 'DS 9'],
+  Ferrari: ['Portofino', 'Roma', 'F8', '296 GTB'],
+  Fiat: ['Albea', 'Egea', 'Linea', 'Doblo', 'Fiorino', 'Punto', '500', '500X', 'Tipo', 'Panda', 'Ducato'],
+  Ford: ['Fiesta', 'Focus', 'Mondeo', 'Kuga', 'Puma', 'EcoSport', 'Courier', 'Connect', 'Custom', 'Transit', 'Ranger'],
+  Geely: ['Coolray', 'Geometry C', 'Emgrand'],
+  Honda: ['Civic', 'City', 'Jazz', 'Accord', 'CR-V', 'HR-V', 'ZR-V', 'e:Ny1'],
+  Hyundai: ['i10', 'i20', 'i30', 'Accent', 'Elantra', 'Tucson', 'Bayon', 'Kona', 'Santa Fe', 'Staria'],
+  Infiniti: ['Q30', 'Q50', 'QX30', 'FX'],
+  Isuzu: ['D-Max', 'NPR', 'NQR', 'Turkuaz'],
+  Iveco: ['Daily', 'Eurocargo', 'Stralis'],
+  Jaguar: ['XE', 'XF', 'XJ', 'F-Pace', 'E-Pace', 'I-Pace'],
+  Jeep: ['Renegade', 'Compass', 'Cherokee', 'Grand Cherokee', 'Wrangler', 'Avenger'],
+  Kia: ['Picanto', 'Rio', 'Ceed', 'XCeed', 'Cerato', 'Sportage', 'Stonic', 'Sorento', 'Niro', 'EV6'],
+  Lada: ['Niva', 'Samara', 'Vega', 'Kalina'],
+  Lamborghini: ['Huracan', 'Aventador', 'Urus', 'Revuelto'],
+  Lancia: ['Delta', 'Ypsilon', 'Musa'],
+  'Land Rover': ['Defender', 'Discovery', 'Discovery Sport', 'Range Rover Evoque', 'Range Rover Sport', 'Range Rover Velar'],
+  Lexus: ['IS', 'ES', 'NX', 'RX', 'UX'],
+  Maserati: ['Ghibli', 'Quattroporte', 'Levante', 'Grecale'],
+  Mazda: ['2', '3', '6', 'CX-3', 'CX-30', 'CX-5', 'MX-5'],
+  'Mercedes-Benz': ['A180', 'A200', 'B180', 'C180', 'C200', 'E200', 'E220', 'CLA 200', 'GLA 200', 'GLB 200', 'GLC 300', 'GLE 300', 'Vito', 'Sprinter'],
+  MG: ['ZS', 'HS', 'MG4', 'Marvel R', 'EHS'],
+  Mini: ['Cooper', 'Cooper S', 'Clubman', 'Countryman', 'Paceman'],
+  Mitsubishi: ['Colt', 'Lancer', 'ASX', 'Eclipse Cross', 'Outlander', 'L200', 'Pajero'],
+  Nissan: ['Micra', 'Juke', 'Qashqai', 'X-Trail', 'Navara', 'Note', 'Townstar'],
+  Opel: ['Corsa', 'Astra', 'Insignia', 'Mokka', 'Crossland', 'Grandland', 'Combo', 'Vivaro'],
+  Peugeot: ['206', '207', '208', '301', '307', '308', '408', '508', '2008', '3008', '5008', 'Partner', 'Rifter'],
+  Porsche: ['911', 'Boxster', 'Cayman', 'Panamera', 'Macan', 'Cayenne', 'Taycan'],
+  Renault: ['Clio', 'Megane', 'Taliant', 'Fluence', 'Symbol', 'Captur', 'Kadjar', 'Austral', 'Kangoo', 'Trafic', 'Master'],
+  Seat: ['Ibiza', 'Leon', 'Arona', 'Ateca', 'Toledo', 'Alhambra'],
+  Skoda: ['Fabia', 'Scala', 'Octavia', 'Superb', 'Kamiq', 'Karoq', 'Kodiaq', 'Rapid'],
+  Smart: ['Fortwo', 'Forfour', '#1'],
+  SsangYong: ['Korando', 'Tivoli', 'Rexton', 'Musso'],
+  Subaru: ['Impreza', 'Legacy', 'XV', 'Forester', 'Outback', 'BRZ'],
+  Suzuki: ['Swift', 'Vitara', 'S-Cross', 'Jimny', 'Baleno', 'SX4'],
+  Tesla: ['Model 3', 'Model Y', 'Model S', 'Model X', 'Cybertruck'],
+  Togg: ['T10X', 'T10F'],
+  Toyota: ['Corolla', 'Yaris', 'C-HR', 'Auris', 'RAV4', 'Camry', 'Hilux', 'Proace', 'Land Cruiser'],
+  Volkswagen: ['Polo', 'Golf', 'Passat', 'Jetta', 'Tiguan', 'T-Roc', 'Taigo', 'Arteon', 'Caddy', 'Transporter', 'Caravelle', 'Crafter'],
+  Volvo: ['S40', 'S60', 'S90', 'V40', 'V60', 'XC40', 'XC60', 'XC90', 'EX30'],
+};
+
+const MOTOR_BRANDS = {
+  Aprilia: ['SR GT 200', 'RS 125', 'RS 660', 'Tuono 660', 'Tuareg 660'],
+  Bajaj: ['Pulsar NS 125', 'Pulsar NS 200', 'Dominar 250', 'Dominar 400'],
+  Benelli: ['TNT 125', 'TNT 249S', 'TRK 251', 'TRK 502', 'Leoncino 500'],
+  'BMW Motorrad': ['G 310 R', 'G 310 GS', 'F 750 GS', 'F 850 GS', 'R 1250 GS', 'R 1300 GS', 'S 1000 RR'],
+  'CF Moto': ['250 NK', '250 SR', '450 SR', '650 MT', '800 MT', 'XO Papio'],
+  Ducati: ['Monster', 'Scrambler', 'Multistrada', 'Panigale', 'Diavel', 'Streetfighter'],
+  'Harley-Davidson': ['Sportster', 'Iron 883', 'Street Bob', 'Fat Boy', 'Nightster', 'Pan America'],
+  Honda: ['PCX 125', 'Dio', 'Forza 250', 'CBR 125R', 'CB 250R', 'CB 500F', 'NC750X', 'X-ADV', 'Africa Twin'],
+  Husqvarna: ['Svartpilen 250', 'Svartpilen 401', 'Vitpilen 401', 'Norden 901'],
+  Kawasaki: ['Ninja 250', 'Ninja 400', 'Ninja 650', 'Z400', 'Z650', 'Z900', 'Versys 650', 'Vulcan S'],
+  KTM: ['Duke 125', 'Duke 250', 'Duke 390', 'Adventure 250', 'Adventure 390', 'RC 390', '790 Adventure'],
+  Kuba: ['Bluebird', 'CR1', 'TK03', 'Superlight', 'Chia'],
+  Kymco: ['Agility 125', 'People S', 'Downtown 250', 'Xciting 400', 'AK 550'],
+  Mondial: ['Revival 50', 'SFC 100', 'Drift L', 'RX3i Evo', 'ZNU 125'],
+  Piaggio: ['Beverly 300', 'Medley 150', 'Liberty 125', 'MP3 300'],
+  RKS: ['Newlight 125 Pro', 'Blazer 50', 'Grace 202', 'Freccia 150', 'RN 180'],
+  'Royal Enfield': ['Classic 350', 'Meteor 350', 'Hunter 350', 'Himalayan', 'Interceptor 650'],
+  Suzuki: ['Burgman 200', 'Burgman 400', 'V-Strom 250', 'V-Strom 650', 'GSX-R 125', 'GSX-S 750', 'Hayabusa'],
+  SYM: ['Jet 14', 'Joyride 200', 'Maxsym 400', 'Cruisym 250'],
+  Triumph: ['Trident 660', 'Street Triple', 'Tiger 900', 'Bonneville T100', 'Speed Twin'],
+  TVS: ['Jupiter', 'Raider 125', 'Apache RTR 200', 'Apache RR 310'],
+  Vespa: ['Primavera', 'Sprint', 'GTS 300', 'VXL 150'],
+  Yamaha: ['NMAX 125', 'XMAX 250', 'Tracer 700', 'MT-07', 'MT-09', 'R25', 'R7', 'Tenere 700'],
+};
+
+const buildCatalogPaths = (catalog, series) =>
+  Object.entries(catalog).flatMap(([brand, models]) =>
+    models.flatMap((model) => series.map(([line, pack]) => [brand, model, line, pack])),
+  );
+
+const EXTENDED_DEFAULT_PATHS = {
+  vehicle: [
+    ['Fiat', 'Albea', 'Dynamic', '1.6 LPG'],
+    ...buildCatalogPaths(VEHICLE_BRANDS, [
+      ['Standart', 'Baz Paket'],
+      ['Premium', 'Full Paket'],
+    ]),
+  ],
+  motor: buildCatalogPaths(MOTOR_BRANDS, [
+    ['Standart', 'ABS'],
+    ['Touring', 'Çantalı'],
+  ]),
+  telefon: [
+    ['iPhone iOS Telefon', 'Apple', 'iPhone 17 Pro Max', '1 TB'],
+    ['iPhone iOS Telefon', 'Apple', 'iPhone 16 Pro Max', '256 GB'],
+    ['iPhone iOS Telefon', 'Apple', 'iPhone 15 Pro', '128 GB'],
+    ['Android Telefon', 'Samsung', 'Galaxy S24 Ultra', '512 GB'],
+    ['Android Telefon', 'Xiaomi', 'Redmi Note 13 Pro', '256 GB'],
+    ['Android Telefon', 'Oppo', 'Reno Serisi', '128 GB'],
+    ['Telefon Aksesuarları', 'Kulaklık', 'Bluetooth', 'Kablosuz'],
+    ['Telefon Yedek Parçaları', 'Ekran', 'iPhone', 'OLED'],
+  ],
+  'kisisel-bakim-kozmetik': [
+    ['Kozmetik', 'Parfüm', 'Kadın', 'EDP'],
+    ['Kozmetik', 'Makyaj', 'Fondöten', 'Orta Ton'],
+    ['Kişisel Bakım', 'Tıraş Makinesi', 'Kablosuz', 'Islak Kuru'],
+    ['Kişisel Bakım', 'Saç Kurutma', 'Profesyonel', 'İyonik'],
+  ],
+  'anne-bebek-oyuncak': [
+    ['Bebek', 'Bebek Arabası', 'Travel Sistem', 'Katlanabilir'],
+    ['Bebek', 'Oto Koltuğu', '0-36 kg', 'Isofix'],
+    ['Oyuncak', 'Eğitici Oyuncak', 'Ahşap', '3+ Yaş'],
+    ['Çocuk Giyim', 'Ayakkabı', 'Spor', 'Ortopedik'],
+  ],
+  'hobi-kitap-muzik': [
+    ['Kitap', 'Roman', 'Türk Edebiyatı', 'Ciltli'],
+    ['Kitap', 'Ders Kitabı', 'Lise', 'Sayısal'],
+    ['Müzik', 'Gitar', 'Elektro Gitar', 'Amfi Seti'],
+    ['Hobi', 'Koleksiyon', 'Plak', 'LP'],
+  ],
+  'ofis-kirtasiye': [
+    ['Ofis', 'Ofis Masası', 'Çalışma Masası', 'Ahşap'],
+    ['Ofis', 'Ofis Koltuğu', 'Ergonomik', 'Fileli'],
+    ['Kırtasiye', 'Kalem', 'Dolma Kalem', 'Set'],
+    ['Kırtasiye', 'Yazıcı Sarf', 'Toner', 'Muadil'],
+  ],
+  'spor-outdoor': [
+    ['Spor', 'Fitness', 'Koşu Bandı', 'Ev Tipi'],
+    ['Spor', 'Bisiklet', 'Dağ Bisikleti', '29 Jant'],
+    ['Outdoor', 'Kamp', 'Çadır', '4 Kişilik'],
+    ['Outdoor', 'Balıkçılık', 'Olta Takımı', 'Spin'],
+  ],
+  'diger-araclar': [
+    ['Karavan', 'Çekme Karavan', '750 kg Altı', 'Ruhsatsız'],
+    ['Tekne', 'Fiber Tekne', 'Motorlu', 'Balıkçı'],
+    ['Tarım Aracı', 'Traktör', 'Bahçe Tipi', 'Dizel'],
+    ['Römork', 'Araç Römorku', 'Tek Dingil', 'Kapaklı'],
+    ['Araç Parça', 'Lastik & Jant', 'Jant', '17 İnç'],
+  ],
+  antika: [
+    ['Antika', 'Mobilya', 'Konsol', 'Ahşap'],
+    ['Antika', 'Obje', 'Pirinç', 'El İşçiliği'],
+    ['Koleksiyon', 'Plak', '45lik', 'Türkçe'],
+    ['Koleksiyon', 'Para', 'Osmanlı', 'Gümüş'],
+  ],
+  'pet-shop': [
+    ['Pet Ürünleri', 'Mama', 'Kedi Maması', 'Yetişkin'],
+    ['Pet Ürünleri', 'Taşıma Çantası', 'Kedi', 'Kabin Boy'],
+    ['Kedi Ürünleri', 'Kum Kabı', 'Kapalı', 'Filtreli'],
+    ['Köpek Ürünleri', 'Tasma', 'Göğüs Tasması', 'Ayarlanabilir'],
+    ['Kuş Ürünleri', 'Kafes', 'Muhabbet Kuşu', 'Büyük Boy'],
+  ],
+};
+
+const seededDefaultGroups = new Set();
+
 const ROOT_ALIASES = {
   vehicle: new Set(['arac', 'araç', 'otomobil', 'vasita', 'vehicle']),
   motor: new Set(['motor', 'motosiklet', 'motorcycle']),
-  elektronik: new Set(['elektronik', 'telefon', 'bilgisayar']),
+  telefon: new Set(['telefon', 'cep telefonu', 'cep-telefonu']),
+  elektronik: new Set(['elektronik', 'bilgisayar']),
   emlak: new Set(['emlak', 'konut']),
   'ev-esyasi': new Set(['ev-esyasi', 'ev eşyası', 'ev esyasi']),
 };
@@ -102,6 +270,14 @@ const makeSlug = (value) =>
   String(value || '')
     .trim()
     .toLocaleLowerCase('tr-TR')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
     .replace(/ğ/g, 'g')
     .replace(/ü/g, 'u')
     .replace(/ş/g, 's')
@@ -180,16 +356,52 @@ const importPath = async (groupKey, path, baseSortOrder = 0) => {
   return imported;
 };
 
-const ensureDefaults = async (groupKey) => {
-  const defaults = DEFAULT_PATHS[groupKey];
-  if (!defaults) return;
+const importDefaultPaths = async (groupKey, paths) => {
+  const cache = new Map();
+  let imported = 0;
 
-  const { rows } = await query('SELECT COUNT(*)::int AS count FROM hierarchy_options WHERE group_key = $1', [groupKey]);
-  if (rows[0].count > 0) return;
+  for (let pathIndex = 0; pathIndex < paths.length; pathIndex += 1) {
+    let parentId = null;
+    const cleanPath = paths[pathIndex].map((item) => String(item || '').trim()).filter(Boolean);
 
-  for (let index = 0; index < defaults.length; index += 1) {
-    await importPath(groupKey, defaults[index], index * 10);
+    for (let level = 0; level < cleanPath.length; level += 1) {
+      const label = cleanPath[level];
+      const cacheKey = `${parentId || 'root'}:${makeSlug(label)}`;
+      if (cache.has(cacheKey)) {
+        parentId = cache.get(cacheKey);
+        continue;
+      }
+
+      const node = await upsertNode({
+        groupKey,
+        parentId,
+        label,
+        level,
+        sortOrder: pathIndex * 10 + level,
+      });
+      if (!node) continue;
+
+      cache.set(cacheKey, node.id);
+      parentId = node.id;
+      imported += 1;
+    }
   }
+
+  return imported;
+};
+
+const ensureDefaults = async (groupKey) => {
+  if (seededDefaultGroups.has(groupKey)) return;
+
+  const defaults = [...(DEFAULT_PATHS[groupKey] || []), ...(EXTENDED_DEFAULT_PATHS[groupKey] || [])];
+  if (!defaults.length) {
+    seededDefaultGroups.add(groupKey);
+    return;
+  }
+
+  await importDefaultPaths(groupKey, defaults);
+
+  seededDefaultGroups.add(groupKey);
 };
 
 const buildTree = (rows) => {

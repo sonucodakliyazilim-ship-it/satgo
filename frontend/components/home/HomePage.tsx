@@ -31,24 +31,24 @@ import ListingCard from '@/components/listings/ListingCard'
 const fallbackBanners = [
   {
     id: 'fallback-main',
-    title: 'Satgo’da temiz ilan, hızlı alıcı.',
-    subtitle: 'Araçtan elektroniğe, güven veren ilanları şehir ve kategoriye göre keşfet.',
-    href: '/ilanlar',
-    image_url: '/satgo-logo.jpeg',
+    title: 'Araçta doğru marka, model ve paketle hızlı satış',
+    subtitle: 'BMW X5 xDrive gibi net hiyerarşiyle ilanını doğru alıcıya göster.',
+    href: '/ilanlar?kategori=arac',
+    image_url: 'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1600&q=78',
   },
   {
     id: 'fallback-vehicle',
-    title: 'Araç ilanlarında marka, model, paket seçimi hazır.',
-    subtitle: 'BMW X5 xDrive gibi net filtrelerle doğru alıcıya daha hızlı ulaş.',
-    href: '/ilanlar?kategori=arac',
-    image_url: '/satgo-logo.jpeg',
+    title: 'Telefon ve elektronik fırsatlarını güvenle keşfet',
+    subtitle: 'Model, seri ve depolama seçenekleriyle aradığın ürünü daha hızlı bul.',
+    href: '/ilanlar?kategori=telefon',
+    image_url: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1600&q=78',
   },
   {
     id: 'fallback-sell',
-    title: 'İlanını dakikalar içinde yayına hazırla.',
-    subtitle: 'Fotoğrafını ekle, kategorini seç, ilanını vitrine taşı.',
-    href: '/ilan-ver',
-    image_url: '/satgo-logo.jpeg',
+    title: 'Ev, yaşam ve günlük ihtiyaçlar tek vitrinde',
+    subtitle: 'Gerçek ilanlar, güçlü filtreler ve aktif kategori yapısıyla Satgo vitrini.',
+    href: '/ilanlar',
+    image_url: 'https://images.unsplash.com/photo-1566576912321-d58ddd7a6088?auto=format&fit=crop&w=1600&q=78',
   },
 ]
 
@@ -127,26 +127,32 @@ export default function HomePage() {
     let mounted = true
     setLoadingSections(true)
 
-    Promise.all(
-      listingSectionConfigs.map(async (section) => {
-        try {
-          const { data } = await listingsApi.getAll({ ...section.params, page: 1 })
-          let listings = data.data?.listings || []
-
-          if (!listings.length && section.fallbackParams) {
-            const fallback = await listingsApi.getAll({ ...section.fallbackParams, page: 1 })
-            listings = fallback.data.data?.listings || []
-          }
-
-          return { ...section, listings: listings.slice(0, 4) }
-        } catch {
-          return { ...section, listings: [] }
-        }
-      }),
-    )
-      .then((sections) => {
-        if (mounted) setListingSections(sections)
+    listingsApi
+      .getHomeSections()
+      .then(({ data }) => {
+        if (mounted && data.data?.length) setListingSections(data.data)
       })
+      .catch(() =>
+        Promise.all(
+          listingSectionConfigs.map(async (section) => {
+            try {
+              const { data } = await listingsApi.getAll({ ...section.params, page: 1 })
+              let listings = data.data?.listings || []
+
+              if (!listings.length && section.fallbackParams) {
+                const fallback = await listingsApi.getAll({ ...section.fallbackParams, page: 1 })
+                listings = fallback.data.data?.listings || []
+              }
+
+              return { ...section, listings: listings.slice(0, 4) }
+            } catch {
+              return { ...section, listings: [] }
+            }
+          }),
+        ).then((sections) => {
+          if (mounted) setListingSections(sections)
+        }),
+      )
       .finally(() => {
         if (mounted) setLoadingSections(false)
       })

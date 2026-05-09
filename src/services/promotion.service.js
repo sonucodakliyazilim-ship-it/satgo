@@ -82,7 +82,16 @@ const makePaymentCode = () => {
   return `SATGO-${stamp}-${token}`;
 };
 
-const refreshExpiredPromotions = async () => {
+let lastPromotionRefreshAt = 0;
+let promotionRefreshPromise = null;
+const PROMOTION_REFRESH_INTERVAL_MS = 60 * 1000;
+
+const refreshExpiredPromotions = async ({ force = false } = {}) => {
+  const now = Date.now();
+  if (!force && now - lastPromotionRefreshAt < PROMOTION_REFRESH_INTERVAL_MS) return;
+  if (promotionRefreshPromise) return promotionRefreshPromise;
+
+  promotionRefreshPromise = (async () => {
   await query(
     `UPDATE listing_promotions
      SET status = 'expired'
@@ -137,6 +146,13 @@ const refreshExpiredPromotions = async () => {
            AND lp.ends_at > NOW()
        )`,
   );
+
+    lastPromotionRefreshAt = Date.now();
+  })().finally(() => {
+    promotionRefreshPromise = null;
+  });
+
+  return promotionRefreshPromise;
 };
 
 const createPromotionOrder = async ({ listingId, packageId, userId, userNote }) => {

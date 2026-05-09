@@ -9,4 +9,13 @@ export const defaultCategories = [
   { id: 8, name: 'İş İlanları', slug: 'is-ilanlari', icon: '💼', sub_categories: [] },
   { id: 9, name: 'Spor', slug: 'spor', icon: '⚽', sub_categories: [] },
   { id: 10, name: 'Diğer', slug: 'diger', icon: '📦', sub_categories: [] },
+  { id: 11, name: 'Telefon', slug: 'telefon', icon: '📱', sub_categories: [] },
+  { id: 12, name: 'Kişisel Bakım & Kozmetik', slug: 'kisisel-bakim-kozmetik', icon: '✨', sub_categories: [] },
+  { id: 13, name: 'Anne & Bebek & Oyuncak', slug: 'anne-bebek-oyuncak', icon: '🧸', sub_categories: [] },
+  { id: 14, name: 'Hobi & Kitap & Müzik', slug: 'hobi-kitap-muzik', icon: '🎸', sub_categories: [] },
+  { id: 15, name: 'Ofis & Kırtasiye', slug: 'ofis-kirtasiye', icon: '🗂', sub_categories: [] },
+  { id: 16, name: 'Spor & Outdoor', slug: 'spor-outdoor', icon: '🏕', sub_categories: [] },
+  { id: 17, name: 'Diğer Araçlar', slug: 'diger-araclar', icon: '🚚', sub_categories: [] },
+  { id: 18, name: 'Antika', slug: 'antika', icon: '🏺', sub_categories: [] },
+  { id: 19, name: 'Pet Shop', slug: 'pet-shop', icon: '🐾', sub_categories: [] },
 ]

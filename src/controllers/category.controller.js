@@ -12,6 +12,15 @@ const DEFAULT_CATEGORIES = [
   { name: 'İş İlanları', slug: 'is-ilanlari', icon: '💼', sort_order: 8 },
   { name: 'Spor', slug: 'spor', icon: '⚽', sort_order: 9 },
   { name: 'Diğer', slug: 'diger', icon: '📦', sort_order: 10 },
+  { name: 'Telefon', slug: 'telefon', icon: '📱', sort_order: 11 },
+  { name: 'Kişisel Bakım & Kozmetik', slug: 'kisisel-bakim-kozmetik', icon: '✨', sort_order: 12 },
+  { name: 'Anne & Bebek & Oyuncak', slug: 'anne-bebek-oyuncak', icon: '🧸', sort_order: 13 },
+  { name: 'Hobi & Kitap & Müzik', slug: 'hobi-kitap-muzik', icon: '🎸', sort_order: 14 },
+  { name: 'Ofis & Kırtasiye', slug: 'ofis-kirtasiye', icon: '🗂', sort_order: 15 },
+  { name: 'Spor & Outdoor', slug: 'spor-outdoor', icon: '🏕', sort_order: 16 },
+  { name: 'Diğer Araçlar', slug: 'diger-araclar', icon: '🚚', sort_order: 17 },
+  { name: 'Antika', slug: 'antika', icon: '🏺', sort_order: 18 },
+  { name: 'Pet Shop', slug: 'pet-shop', icon: '🐾', sort_order: 19 },
 ];
 
 const DEFAULT_SUB_CATEGORIES = [
@@ -26,13 +35,43 @@ const DEFAULT_SUB_CATEGORIES = [
   { parent_slug: 'motor', name: 'Motosiklet', slug: 'motosiklet', sort_order: 1 },
   { parent_slug: 'motor', name: 'Ekipman', slug: 'motor-ekipman', sort_order: 2 },
   { parent_slug: 'elektronik', name: 'Bilgisayar', slug: 'bilgisayar', sort_order: 1 },
-  { parent_slug: 'elektronik', name: 'Telefon', slug: 'telefon', sort_order: 2 },
+  { parent_slug: 'elektronik', name: 'Telefon', slug: 'elektronik-telefon', sort_order: 2 },
+  { parent_slug: 'telefon', name: 'iPhone iOS Telefon', slug: 'iphone-ios-telefon', sort_order: 1 },
+  { parent_slug: 'telefon', name: 'Android Telefon', slug: 'android-telefon', sort_order: 2 },
+  { parent_slug: 'telefon', name: 'Telefon Aksesuarları', slug: 'telefon-aksesuarlari', sort_order: 3 },
+  { parent_slug: 'telefon', name: 'Telefon Yedek Parçaları', slug: 'telefon-yedek-parcalari', sort_order: 4 },
+  { parent_slug: 'kisisel-bakim-kozmetik', name: 'Kozmetik', slug: 'kozmetik', sort_order: 1 },
+  { parent_slug: 'kisisel-bakim-kozmetik', name: 'Kişisel Bakım', slug: 'kisisel-bakim', sort_order: 2 },
+  { parent_slug: 'anne-bebek-oyuncak', name: 'Bebek', slug: 'bebek', sort_order: 1 },
+  { parent_slug: 'anne-bebek-oyuncak', name: 'Oyuncak', slug: 'oyuncak', sort_order: 2 },
+  { parent_slug: 'hobi-kitap-muzik', name: 'Kitap', slug: 'kitap', sort_order: 1 },
+  { parent_slug: 'hobi-kitap-muzik', name: 'Müzik', slug: 'muzik', sort_order: 2 },
+  { parent_slug: 'ofis-kirtasiye', name: 'Ofis', slug: 'ofis', sort_order: 1 },
+  { parent_slug: 'ofis-kirtasiye', name: 'Kırtasiye', slug: 'kirtasiye', sort_order: 2 },
+  { parent_slug: 'spor-outdoor', name: 'Spor', slug: 'spor-urunleri', sort_order: 1 },
+  { parent_slug: 'spor-outdoor', name: 'Outdoor', slug: 'outdoor', sort_order: 2 },
+  { parent_slug: 'diger-araclar', name: 'Karavan', slug: 'karavan', sort_order: 1 },
+  { parent_slug: 'diger-araclar', name: 'Tekne', slug: 'tekne', sort_order: 2 },
+  { parent_slug: 'diger-araclar', name: 'Tarım Aracı', slug: 'tarim-araci', sort_order: 3 },
+  { parent_slug: 'antika', name: 'Antika', slug: 'antika-urunler', sort_order: 1 },
+  { parent_slug: 'antika', name: 'Koleksiyon', slug: 'koleksiyon', sort_order: 2 },
+  { parent_slug: 'pet-shop', name: 'Pet Ürünleri', slug: 'pet-urunleri', sort_order: 1 },
+  { parent_slug: 'pet-shop', name: 'Kedi Ürünleri', slug: 'kedi-urunleri', sort_order: 2 },
+  { parent_slug: 'pet-shop', name: 'Köpek Ürünleri', slug: 'kopek-urunleri', sort_order: 3 },
 ];
 
 const makeSlug = (value) =>
   String(value || '')
     .trim()
     .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
     .replace(/ğ/g, 'g')
     .replace(/ü/g, 'u')
     .replace(/ş/g, 's')
@@ -128,12 +167,17 @@ const parseCategoryCsv = (csv) => {
     .filter((row) => row.path?.length);
 };
 
+let defaultCategoriesReady = false;
+
 const ensureDefaultCategories = async () => {
+  if (defaultCategoriesReady) return;
+
   for (const category of DEFAULT_CATEGORIES) {
     await query(
       `INSERT INTO categories (name, slug, icon, sort_order, is_active)
        VALUES ($1, $2, $3, $4, TRUE)
        ON CONFLICT (slug) DO UPDATE SET
+         parent_id = NULL,
          name = EXCLUDED.name,
          icon = EXCLUDED.icon,
          sort_order = EXCLUDED.sort_order`,
@@ -154,6 +198,8 @@ const ensureDefaultCategories = async () => {
       [category.parent_slug, category.name, category.slug, category.sort_order]
     );
   }
+
+  defaultCategoriesReady = true;
 };
 
 // GET /api/categories
@@ -162,29 +208,35 @@ const getCategories = async (req, res, next) => {
     await ensureDefaultCategories();
 
     const { rows } = await query(
-      `SELECT c.*,
-              COUNT(l.id) AS listing_count
+      `WITH listing_counts AS (
+         SELECT category_id AS category_id, COUNT(*)::int AS count
+         FROM listings
+         WHERE status = 'active' AND category_id IS NOT NULL
+         GROUP BY category_id
+         UNION ALL
+         SELECT sub_category_id AS category_id, COUNT(*)::int AS count
+         FROM listings
+         WHERE status = 'active' AND sub_category_id IS NOT NULL
+         GROUP BY sub_category_id
+       )
+       SELECT c.*, COALESCE(SUM(lc.count), 0)::int AS listing_count
        FROM categories c
-       LEFT JOIN listings l ON l.category_id = c.id AND l.status = 'active'
-       WHERE c.parent_id IS NULL AND c.is_active = TRUE
+       LEFT JOIN listing_counts lc ON lc.category_id = c.id
+       WHERE c.is_active = TRUE
        GROUP BY c.id
-       ORDER BY c.sort_order`
+       ORDER BY c.parent_id NULLS FIRST, c.sort_order, c.name`
     );
 
-    // Fetch sub-categories for each
-    const withSubs = await Promise.all(rows.map(async (cat) => {
-      const subs = await query(
-        `SELECT c.*, COUNT(l.id) AS listing_count
-         FROM categories c
-         LEFT JOIN listings l ON l.sub_category_id = c.id AND l.status = 'active'
-         WHERE c.parent_id = $1 AND c.is_active = TRUE
-         GROUP BY c.id ORDER BY c.sort_order`,
-        [cat.id]
-      );
-      return { ...cat, sub_categories: subs.rows };
-    }));
+    const byId = new Map();
+    const roots = [];
+    rows.forEach((category) => byId.set(category.id, { ...category, sub_categories: [] }));
+    rows.forEach((category) => {
+      const node = byId.get(category.id);
+      if (category.parent_id && byId.has(category.parent_id)) byId.get(category.parent_id).sub_categories.push(node);
+      else roots.push(node);
+    });
 
-    res.json({ success: true, data: withSubs });
+    res.json({ success: true, data: roots });
   } catch (err) { next(err); }
 };
 

@@ -63,6 +63,57 @@ const buildListingQuery = ({ category, city, district, minPrice, maxPrice, searc
   return { where, order, params, orderParams, offset };
 };
 
+const selectListingCards = async ({ where, order, params, orderParams = [], limit = LISTINGS_PER_PAGE, offset = 0 }) => {
+  const p = params.length + orderParams.length + 1;
+  const { rows } = await query(
+    `SELECT l.*,
+            c.name AS category_name, c.slug AS category_slug, c.icon AS category_icon,
+            u.name AS seller_name, NULL AS seller_avatar, u.rating_avg AS seller_rating,
+            (SELECT url FROM listing_images WHERE listing_id = l.id AND is_primary = TRUE LIMIT 1) AS primary_image
+     FROM listings l
+     JOIN categories c ON c.id = l.category_id
+     JOIN users u ON u.id = l.user_id
+     ${where}
+     ORDER BY ${order}
+     LIMIT $${p} OFFSET $${p + 1}`,
+    [...params, ...orderParams, limit, offset],
+  );
+  return rows;
+};
+
+const HOME_SECTION_CONFIGS = [
+  {
+    key: 'popular',
+    title: 'Popüler İkinci El İlanlar',
+    subtitle: 'Satgo’da en çok incelenen fırsatlar',
+    href: '/ilanlar?sortBy=popular',
+    params: { sortBy: 'popular' },
+  },
+  {
+    key: 'favorites',
+    title: 'Favoriler',
+    subtitle: 'En çok favoriye eklenen ilanlar',
+    href: '/ilanlar?sortBy=favorites',
+    params: { sortBy: 'favorites' },
+  },
+  {
+    key: 'best-sellers',
+    title: 'Çok Satanlar',
+    subtitle: 'Hızlı karar verilen kategorilerden seçtiklerimiz',
+    href: '/ilanlar?sortBy=boosted',
+    params: { sortBy: 'boosted' },
+    fallbackParams: { sortBy: 'newest' },
+  },
+  {
+    key: 'weekly-stars',
+    title: 'Haftanın Yıldızları',
+    subtitle: 'Öne çıkan ve vitrindeki ilanlar',
+    href: '/ilanlar?sortBy=boosted',
+    params: { sortBy: 'boosted', featured: true },
+    fallbackParams: { sortBy: 'newest' },
+  },
+];
+
 // ── Controllers ───────────────────────────────────────────────
 
 // GET /api/listings
@@ -74,25 +125,12 @@ const getListings = async (req, res, next) => {
     const countQ = await query(`SELECT COUNT(*) FROM listings l ${where}`, params);
     const total  = parseInt(countQ.rows[0].count);
 
-    const p = params.length + orderParams.length + 1;
-    const listingsQ = await query(
-      `SELECT l.*,
-              c.name  AS category_name, c.slug AS category_slug, c.icon AS category_icon,
-              u.name  AS seller_name, NULL AS seller_avatar, u.rating_avg AS seller_rating,
-              (SELECT url FROM listing_images WHERE listing_id = l.id AND is_primary = TRUE LIMIT 1) AS primary_image
-       FROM listings l
-       JOIN categories c ON c.id = l.category_id
-       JOIN users u ON u.id = l.user_id
-       ${where}
-       ORDER BY ${order}
-       LIMIT $${p} OFFSET $${p + 1}`,
-      [...params, ...orderParams, LISTINGS_PER_PAGE, offset]
-    );
+    const listings = await selectListingCards({ where, order, params, orderParams, offset });
 
     res.json({
       success: true,
       data: {
-        listings: listingsQ.rows,
+        listings,
         pagination: {
           total,
           page:    parseInt(req.query.page) || 1,
@@ -101,6 +139,31 @@ const getListings = async (req, res, next) => {
         },
       },
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/listings/home-sections
+const getHomeSections = async (req, res, next) => {
+  try {
+    await refreshExpiredPromotions();
+
+    const sections = await Promise.all(
+      HOME_SECTION_CONFIGS.map(async (section) => {
+        const first = buildListingQuery({ ...section.params, page: 1 });
+        let listings = await selectListingCards({ ...first, limit: 4 });
+
+        if (!listings.length && section.fallbackParams) {
+          const fallback = buildListingQuery({ ...section.fallbackParams, page: 1 });
+          listings = await selectListingCards({ ...fallback, limit: 4 });
+        }
+
+        return { ...section, listings };
+      }),
+    );
+
+    res.json({ success: true, data: sections });
   } catch (err) {
     next(err);
   }
@@ -507,6 +570,7 @@ const getUserListings = async (req, res, next) => {
 
 module.exports = {
   getListings,
+  getHomeSections,
   getListing,
   createListing,
   updateListing,

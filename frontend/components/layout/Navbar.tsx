@@ -31,7 +31,9 @@ import {
   Truck,
   User,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { categoriesApi, hierarchyApi } from '@/lib/api'
+import { defaultCategories } from '@/lib/defaultCategories'
 import { useAuthStore } from '@/lib/store'
 import { findNearestCity, getDistricts, LOCATIONS } from '@/lib/locations'
 
@@ -47,6 +49,20 @@ type MegaCategory = {
   icon: any
   color: string
   columns: CategoryColumn[]
+}
+
+type NavCategory = {
+  id?: string | number
+  name: string
+  slug: string
+  icon?: string
+  sub_categories?: NavCategory[]
+}
+
+type HierarchyNode = {
+  id: string
+  label: string
+  children?: HierarchyNode[]
 }
 
 const searchHref = (term: string) => `/ilanlar?search=${encodeURIComponent(term)}`
@@ -205,8 +221,6 @@ const MEGA_CATEGORIES: MegaCategory[] = [
   },
 ]
 
-const TOP_LINKS = ['Araba', 'Telefon', 'Elektronik', 'Ev & Yaşam', 'Motosiklet', 'Giyim & Aksesuar', 'Anne & Bebek & Oyuncak', 'Antika', 'Pet Shop']
-
 const USER_PANEL_LINKS = [
   { href: '/profil', icon: ShoppingBag, label: 'Aldıklarım & Sattıklarım' },
   { href: '/mesajlar', icon: CircleDollarSign, label: 'Tekliflerim' },
@@ -215,10 +229,62 @@ const USER_PANEL_LINKS = [
   { href: '/favoriler', icon: Heart, label: 'Favorilerim' },
 ]
 
+const CATEGORY_META: Record<string, { icon: any; color: string }> = {
+  arac: { icon: Car, color: 'bg-blue-600' },
+  motor: { icon: Bike, color: 'bg-orange-500' },
+  emlak: { icon: Home, color: 'bg-emerald-500' },
+  elektronik: { icon: Smartphone, color: 'bg-teal-500' },
+  telefon: { icon: Smartphone, color: 'bg-violet-500' },
+  'ev-esyasi': { icon: Home, color: 'bg-yellow-400' },
+  giyim: { icon: Shirt, color: 'bg-rose-400' },
+  hizmet: { icon: BriefcaseBusiness, color: 'bg-sky-500' },
+  'is-ilanlari': { icon: BriefcaseBusiness, color: 'bg-indigo-500' },
+  spor: { icon: Trophy, color: 'bg-lime-500' },
+  'spor-outdoor': { icon: Bike, color: 'bg-lime-500' },
+  'kisisel-bakim-kozmetik': { icon: Sparkles, color: 'bg-purple-500' },
+  'anne-bebek-oyuncak': { icon: Baby, color: 'bg-sky-400' },
+  'hobi-kitap-muzik': { icon: BookOpen, color: 'bg-pink-400' },
+  'ofis-kirtasiye': { icon: BriefcaseBusiness, color: 'bg-yellow-500' },
+  'diger-araclar': { icon: Truck, color: 'bg-sky-600' },
+  antika: { icon: Gem, color: 'bg-amber-600' },
+  'pet-shop': { icon: PawPrint, color: 'bg-emerald-500' },
+  diger: { icon: Grid3X3, color: 'bg-gray-600' },
+}
+
+const groupFromCategory = (category?: NavCategory) => {
+  if (!category?.slug) return 'vehicle'
+  if (category.slug === 'arac') return 'vehicle'
+  if (category.slug === 'motor') return 'motor'
+  return category.slug
+}
+
+const categoryHref = (category: NavCategory) => `/ilanlar?kategori=${encodeURIComponent(category.slug)}`
+const categorySearchHref = (category: NavCategory, term: string) =>
+  `${categoryHref(category)}&search=${encodeURIComponent(term)}`
+
+const fallbackColumnsForCategory = (category?: NavCategory): CategoryColumn[] => {
+  if (!category) return []
+  const fallback = MEGA_CATEGORIES.find((item) => item.label === category.name || item.href.includes(category.slug))
+  if (fallback?.columns?.length) return fallback.columns
+  return (category.sub_categories || []).map((item) => ({ title: item.name, href: categorySearchHref(category, item.name) }))
+}
+
+const columnsFromHierarchy = (category: NavCategory | undefined, nodes: HierarchyNode[]): CategoryColumn[] => {
+  if (!category || !nodes.length) return fallbackColumnsForCategory(category)
+  return nodes.slice(0, 36).map((node) => ({
+    title: node.label,
+    href: categorySearchHref(category, node.label),
+    items: (node.children || []).slice(0, 12).map((child) => child.label),
+  }))
+}
+
 export default function Navbar() {
   const { user, logout, selectedCity, selectedDistrict, setSelectedLocation } = useAuthStore()
   const router = useRouter()
   const pathname = usePathname()
+  const [categories, setCategories] = useState<NavCategory[]>(defaultCategories)
+  const [hierarchyByGroup, setHierarchyByGroup] = useState<Record<string, HierarchyNode[]>>({})
+  const [hierarchyLoading, setHierarchyLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const [locationOpen, setLocationOpen] = useState(false)
@@ -227,12 +293,43 @@ export default function Navbar() {
   const [categoryOpen, setCategoryOpen] = useState(false)
   const [activeCategory, setActiveCategory] = useState(1)
 
-  const activeMega = MEGA_CATEGORIES[activeCategory] || MEGA_CATEGORIES[0]
+  const menuCategories = categories.length ? categories : defaultCategories
+  const activeMenuCategory = menuCategories[activeCategory] || menuCategories[0]
+  const activeGroup = groupFromCategory(activeMenuCategory)
+  const activeHierarchy = hierarchyByGroup[activeGroup] || []
+  const activeColumns = useMemo(
+    () => columnsFromHierarchy(activeMenuCategory, activeHierarchy),
+    [activeMenuCategory, activeHierarchy],
+  )
+  const activeMeta = CATEGORY_META[activeMenuCategory?.slug || ''] || CATEGORY_META.diger
+  const ActiveIcon = activeMeta.icon
   const locationLabel = selectedCity
     ? selectedDistrict
       ? `${selectedCity}, ${selectedDistrict}`
       : selectedCity
     : 'Her Yer'
+
+  useEffect(() => {
+    categoriesApi
+      .getAll()
+      .then(({ data }) => setCategories(data.data?.length ? data.data : defaultCategories))
+      .catch(() => setCategories(defaultCategories))
+  }, [])
+
+  useEffect(() => {
+    if (!categoryOpen || !activeGroup || hierarchyByGroup[activeGroup]) return
+
+    setHierarchyLoading(true)
+    hierarchyApi
+      .getTree(activeGroup)
+      .then(({ data }) => {
+        setHierarchyByGroup((current) => ({ ...current, [activeGroup]: data.data || [] }))
+      })
+      .catch(() => {
+        setHierarchyByGroup((current) => ({ ...current, [activeGroup]: [] }))
+      })
+      .finally(() => setHierarchyLoading(false))
+  }, [activeGroup, categoryOpen, hierarchyByGroup])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -452,19 +549,18 @@ export default function Navbar() {
               Kategoriler
             </button>
 
-            {TOP_LINKS.slice(0, 5).map((label) => {
-              const index = MEGA_CATEGORIES.findIndex((category) => category.label === label)
+            {menuCategories.slice(0, 6).map((category, index) => {
               return (
                 <button
-                  key={label}
+                  key={category.slug}
                   type="button"
                   className="shrink-0 h-8 rounded-full border border-gray-200 bg-white px-3 text-sm font-bold text-gray-800"
                   onClick={() => {
-                    if (index >= 0) setActiveCategory(index)
+                    setActiveCategory(index)
                     setCategoryOpen(true)
                   }}
                 >
-                  {label}
+                  {category.name}
                 </button>
               )
             })}
@@ -483,22 +579,21 @@ export default function Navbar() {
               <ChevronDown className={`w-4 h-4 transition-transform ${categoryOpen ? 'rotate-180' : ''}`} />
             </button>
 
-            {TOP_LINKS.map((label) => {
-              const index = MEGA_CATEGORIES.findIndex((category) => category.label === label)
+            {menuCategories.map((category, index) => {
               return (
                 <button
-                  key={label}
+                  key={category.slug}
                   type="button"
                   className="shrink-0 text-sm font-medium text-gray-800 hover:text-brand whitespace-nowrap"
                   onClick={() => {
-                    if (index >= 0) setActiveCategory(index)
+                    setActiveCategory(index)
                     setCategoryOpen(true)
                   }}
                   onMouseEnter={() => {
-                    if (index >= 0) setActiveCategory(index)
+                    setActiveCategory(index)
                   }}
                 >
-                  {label}
+                  {category.name}
                 </button>
               )
             })}
@@ -507,56 +602,69 @@ export default function Navbar() {
           {categoryOpen && (
             <div className="fixed inset-x-3 top-[105px] z-50 max-h-[72vh] overflow-y-auto rounded-2xl border border-gray-200 bg-white shadow-2xl md:absolute md:inset-auto md:left-0 md:top-11 md:h-[520px] md:w-[min(96vw,1240px)] md:max-h-none md:overflow-hidden md:rounded-b-xl md:rounded-t-none md:grid md:grid-cols-[310px_1fr]">
               <div className="grid grid-cols-2 gap-2 p-3 md:hidden">
-                {MEGA_CATEGORIES.map((category, index) => {
-                  const Icon = category.icon
+                {menuCategories.map((category, index) => {
+                  const meta = CATEGORY_META[category.slug] || CATEGORY_META.diger
+                  const Icon = meta.icon
                   return (
                     <Link
-                      href={category.href}
-                      key={category.label}
+                      href={categoryHref(category)}
+                      key={category.slug}
                       onClick={() => {
                         setActiveCategory(index)
                         setCategoryOpen(false)
                       }}
                       className="flex min-h-[68px] items-center gap-2 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-sm font-black text-gray-900"
                     >
-                      <span className={`w-9 h-9 rounded-full ${category.color} text-white flex items-center justify-center shrink-0`}>
+                      <span className={`w-9 h-9 rounded-full ${meta.color} text-white flex items-center justify-center shrink-0`}>
                         <Icon className="w-5 h-5" />
                       </span>
-                      <span className="min-w-0 flex-1 leading-snug">{category.label}</span>
+                      <span className="min-w-0 flex-1 leading-snug">{category.name}</span>
                     </Link>
                   )
                 })}
               </div>
 
               <div className="hidden bg-gray-50 py-5 overflow-y-auto md:block">
-                {MEGA_CATEGORIES.map((category, index) => {
-                  const Icon = category.icon
+                {menuCategories.map((category, index) => {
+                  const meta = CATEGORY_META[category.slug] || CATEGORY_META.diger
+                  const Icon = meta.icon
                   const active = index === activeCategory
                   return (
                     <Link
-                      href={category.href}
-                      key={category.label}
+                      href={categoryHref(category)}
+                      key={category.slug}
                       onMouseEnter={() => setActiveCategory(index)}
                       onClick={() => setCategoryOpen(false)}
                       className={`mx-4 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-black transition-colors ${
                         active ? 'bg-white text-black shadow-sm' : 'text-black hover:bg-white'
                       }`}
                     >
-                      <span className={`w-9 h-9 rounded-full ${category.color} text-white flex items-center justify-center shrink-0`}>
+                      <span className={`w-9 h-9 rounded-full ${meta.color} text-white flex items-center justify-center shrink-0`}>
                         <Icon className="w-5 h-5" />
                       </span>
-                      <span className="truncate">{category.label}</span>
+                      <span className="truncate">{category.name}</span>
                     </Link>
                   )
                 })}
               </div>
 
               <div className="hidden p-8 overflow-y-auto md:block">
+                <div className="mb-6 flex items-center gap-3">
+                  <span className={`grid h-11 w-11 place-items-center rounded-full ${activeMeta.color} text-white`}>
+                    <ActiveIcon className="h-6 w-6" />
+                  </span>
+                  <div>
+                    <h3 className="text-lg font-black text-gray-950">{activeMenuCategory?.name}</h3>
+                    <p className="text-xs font-semibold text-gray-500">
+                      {hierarchyLoading ? 'Dinamik hiyerarşi yükleniyor...' : 'Bağımlı kategori seçenekleri'}
+                    </p>
+                  </div>
+                </div>
                 <div className="grid grid-cols-3 gap-x-12 gap-y-7">
-                  {activeMega.columns.map((column) => (
+                  {activeColumns.map((column) => (
                     <div key={column.title} className="min-w-0">
                       <Link
-                        href={column.href || searchHref(column.title)}
+                        href={column.href || categorySearchHref(activeMenuCategory, column.title)}
                         onClick={() => setCategoryOpen(false)}
                         className="inline-flex items-center gap-1 text-brand font-black hover:text-brand-dark"
                       >
@@ -568,7 +676,7 @@ export default function Navbar() {
                           {column.items.map((item) => (
                             <Link
                               key={item}
-                              href={searchHref(item)}
+                              href={categorySearchHref(activeMenuCategory, item)}
                               onClick={() => setCategoryOpen(false)}
                               className="block text-sm font-medium text-gray-900 hover:text-brand truncate"
                             >
@@ -576,7 +684,7 @@ export default function Navbar() {
                             </Link>
                           ))}
                           <Link
-                            href={column.href || searchHref(column.title)}
+                            href={column.href || categorySearchHref(activeMenuCategory, column.title)}
                             onClick={() => setCategoryOpen(false)}
                             className="inline-flex items-center gap-1 text-sm font-black text-black hover:text-brand pt-1"
                           >
@@ -587,6 +695,11 @@ export default function Navbar() {
                       )}
                     </div>
                   ))}
+                  {!hierarchyLoading && !activeColumns.length && (
+                    <div className="col-span-3 rounded-xl border border-dashed border-gray-200 p-8 text-center text-sm font-semibold text-gray-500">
+                      Bu kategori için hiyerarşi verisi admin panelinden eklenebilir.
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

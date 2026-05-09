@@ -8,6 +8,8 @@ router.get('/', optionalAuth, ctrl.getListings);
 
 router.get('/me', authenticate, ctrl.getMyListings);
 
+router.get('/home-sections', optionalAuth, ctrl.getHomeSections);
+
 router.get('/user/:userId', ctrl.getUserListings);
 
 router.get('/:id',

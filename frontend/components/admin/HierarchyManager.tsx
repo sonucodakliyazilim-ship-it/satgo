@@ -29,9 +29,23 @@ const emptyForm = {
 const defaultGroups: GroupOption[] = [
   { value: 'vehicle', label: 'Araç', hint: 'Marka > Model > Seri > Paket' },
   { value: 'motor', label: 'Motor', hint: 'Marka > Model > Seri > Paket' },
+  { value: 'telefon', label: 'Telefon', hint: 'Telefon tipi > Marka > Model > Hafıza' },
   { value: 'elektronik', label: 'Elektronik', hint: 'Tür > Marka > Model > Seri' },
   { value: 'emlak', label: 'Emlak', hint: 'Tip > İlan Tipi > Alt Tür' },
   { value: 'ev-esyasi', label: 'Ev Eşyası', hint: 'Grup > Ürün > Detay' },
+  { value: 'giyim', label: 'Giyim', hint: 'Cinsiyet > Ürün > Tür > Detay' },
+  { value: 'hizmet', label: 'Hizmet', hint: 'Hizmet > Alan > Detay > Paket' },
+  { value: 'is-ilanlari', label: 'İş İlanları', hint: 'Çalışma tipi > Departman > Pozisyon' },
+  { value: 'spor', label: 'Spor', hint: 'Branş > Ürün > Tür > Detay' },
+  { value: 'spor-outdoor', label: 'Spor & Outdoor', hint: 'Alan > Ürün > Tür > Detay' },
+  { value: 'kisisel-bakim-kozmetik', label: 'Kişisel Bakım & Kozmetik', hint: 'Grup > Ürün > Tür > Detay' },
+  { value: 'anne-bebek-oyuncak', label: 'Anne & Bebek & Oyuncak', hint: 'Grup > Ürün > Tür > Detay' },
+  { value: 'hobi-kitap-muzik', label: 'Hobi & Kitap & Müzik', hint: 'Grup > Ürün > Tür > Detay' },
+  { value: 'ofis-kirtasiye', label: 'Ofis & Kırtasiye', hint: 'Grup > Ürün > Tür > Detay' },
+  { value: 'diger-araclar', label: 'Diğer Araçlar', hint: 'Araç grubu > Tür > Alt tür > Detay' },
+  { value: 'antika', label: 'Antika', hint: 'Grup > Ürün > Tür > Detay' },
+  { value: 'pet-shop', label: 'Pet Shop', hint: 'Grup > Ürün > Tür > Detay' },
+  { value: 'diger', label: 'Diğer', hint: 'Grup > Alt grup > Tür > Detay' },
 ]
 
 const sampleCsv = `BMW,X5,xDrive,M Sport
