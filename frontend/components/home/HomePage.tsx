@@ -1,30 +1,52 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  Bike,
+  ChevronRight,
+  Coffee,
+  Gamepad2,
+  Heart,
+  Laptop,
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
+  Trophy,
+} from 'lucide-react'
 import { bannersApi, listingsApi } from '@/lib/api'
 import { mediaUrl } from '@/lib/media'
 import ListingCard from '@/components/listings/ListingCard'
-import ListingsPage from '@/app/ilanlar/page'
 
 const fallbackBanners = [
   {
-    id: 'fallback-sell',
-    title: 'Satgo vitrininde ilanini one cikar',
-    subtitle: 'Arac, telefon, elektronik ve daha fazlasi icin hizli ilan yayini.',
-    href: '/ilan-ver',
-    image_url: '/satgo-logo.jpeg',
-  },
-  {
-    id: 'fallback-promote',
-    title: 'Kampanyali one cikarma paketleri',
-    subtitle: 'Haftalik, acil ve vitrin paketleriyle daha fazla gorunurluk al.',
+    id: 'fallback-main',
+    title: 'Fiyatlar karşına dikildiyse, uygununu Satgo’da bul.',
+    subtitle: 'Telefon, araç, elektronik ve ev yaşam ürünlerinde temiz ikinci el fırsatlar.',
     href: '/ilanlar',
     image_url: '/satgo-logo.jpeg',
   },
 ]
 
+const trendCategories = [
+  { label: 'Cüzdanım Güvende', href: '/ilanlar?sortBy=favorites', icon: ShieldCheck, tint: 'from-sky-500 to-cyan-300' },
+  { label: 'Yerinde İncele', href: '/ilanlar?search=araç', icon: Trophy, tint: 'from-orange-500 to-amber-300' },
+  { label: 'Telefon', href: '/ilanlar?search=telefon', icon: Smartphone, tint: 'from-blue-500 to-sky-300' },
+  { label: 'Bilgisayar', href: '/ilanlar?search=bilgisayar', icon: Laptop, tint: 'from-indigo-500 to-blue-300' },
+  { label: 'Oyunculara Özel', href: '/ilanlar?search=oyun', icon: Gamepad2, tint: 'from-purple-500 to-fuchsia-300' },
+  { label: 'Kahve Makinesi', href: '/ilanlar?search=kahve makinesi', icon: Coffee, tint: 'from-stone-700 to-orange-300' },
+  { label: 'En Çok Beğenilenler', href: '/ilanlar?sortBy=favorites', icon: Heart, tint: 'from-rose-500 to-pink-300' },
+  { label: 'Fitness Sporları', href: '/ilanlar?search=fitness', icon: Bike, tint: 'from-emerald-500 to-lime-300' },
+]
+
 const listingSectionConfigs = [
+  {
+    key: 'popular',
+    title: 'Popüler İkinci El İlanlar',
+    subtitle: 'Satgo’da en çok incelenen fırsatlar',
+    href: '/ilanlar?sortBy=popular',
+    params: { sortBy: 'popular' },
+  },
   {
     key: 'favorites',
     title: 'Favoriler',
@@ -33,16 +55,17 @@ const listingSectionConfigs = [
     params: { sortBy: 'favorites' },
   },
   {
-    key: 'popular',
+    key: 'best-sellers',
     title: 'Çok Satanlar',
-    subtitle: 'En çok ilgi gören ilanlar',
-    href: '/ilanlar?sortBy=popular',
-    params: { sortBy: 'popular' },
+    subtitle: 'Hızlı karar verilen kategorilerden seçtiklerimiz',
+    href: '/ilanlar?sortBy=boosted',
+    params: { sortBy: 'boosted' },
+    fallbackParams: { sortBy: 'newest' },
   },
   {
     key: 'weekly-stars',
     title: 'Haftanın Yıldızları',
-    subtitle: 'Öne çıkan ve vitrindeki fırsatlar',
+    subtitle: 'Öne çıkan ve vitrindeki ilanlar',
     href: '/ilanlar?sortBy=boosted',
     params: { sortBy: 'boosted', featured: true },
     fallbackParams: { sortBy: 'newest' },
@@ -52,6 +75,7 @@ const listingSectionConfigs = [
 export default function HomePage() {
   const [banners, setBanners] = useState<any[]>([])
   const [listingSections, setListingSections] = useState<any[]>([])
+  const [loadingSections, setLoadingSections] = useState(true)
 
   useEffect(() => {
     bannersApi
@@ -62,6 +86,7 @@ export default function HomePage() {
 
   useEffect(() => {
     let mounted = true
+    setLoadingSections(true)
 
     Promise.all(
       listingSectionConfigs.map(async (section) => {
@@ -79,71 +104,147 @@ export default function HomePage() {
           return { ...section, listings: [] }
         }
       }),
-    ).then((sections) => {
-      if (mounted) setListingSections(sections)
-    })
+    )
+      .then((sections) => {
+        if (mounted) setListingSections(sections)
+      })
+      .finally(() => {
+        if (mounted) setLoadingSections(false)
+      })
 
     return () => {
       mounted = false
     }
   }, [])
 
-  const visibleBanners = banners.length ? banners : fallbackBanners
+  const hero = banners[0] || fallbackBanners[0]
+  const heroImage = mediaUrl(hero.image_url)
+  const visibleSections = useMemo(
+    () => listingSections.filter((section) => section.listings.length),
+    [listingSections],
+  )
 
   return (
-    <>
-      <section className="mx-auto max-w-7xl px-3 pt-4 sm:px-4 sm:pt-6">
-        <div className="grid gap-3 md:grid-cols-[1.4fr_1fr]">
-          {visibleBanners.slice(0, 2).map((banner, index) => (
-            <Link
-              key={banner.id || banner.title}
-              href={banner.href || '/ilanlar'}
-              className={`group relative min-h-[156px] overflow-hidden rounded-lg border border-gray-100 bg-gray-950 text-white shadow-sm ${
-                index === 0 ? 'md:min-h-[230px]' : 'md:min-h-[230px]'
-              }`}
-            >
-              {mediaUrl(banner.image_url) && (
-                <img
-                  src={mediaUrl(banner.image_url) || ''}
-                  alt={banner.title}
-                  className="absolute inset-0 h-full w-full object-cover opacity-45 transition-transform duration-300 group-hover:scale-105"
-                />
-              )}
-              <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/45 to-black/10" />
-              <div className="relative flex h-full max-w-xl flex-col justify-end p-5 sm:p-6">
-                <p className="mb-2 text-xs font-black uppercase tracking-[0.18em] text-brand">Satgo Kampanya</p>
-                <h1 className="text-2xl font-black leading-tight sm:text-3xl">{banner.title}</h1>
-                {banner.subtitle && <p className="mt-2 max-w-md text-sm font-semibold text-white/80">{banner.subtitle}</p>}
-              </div>
-            </Link>
-          ))}
+    <main className="bg-white pb-10">
+      <section className="mx-auto max-w-6xl px-3 pt-4 sm:px-4 sm:pt-5">
+        <Link
+          href={hero.href || '/ilanlar'}
+          className="group relative block min-h-[210px] overflow-hidden rounded-lg bg-[#8f35e5] text-white shadow-sm sm:min-h-[280px]"
+        >
+          {heroImage && (
+            <img
+              src={heroImage}
+              alt={hero.title}
+              className="absolute inset-0 h-full w-full object-cover opacity-30 transition-transform duration-500 group-hover:scale-105"
+            />
+          )}
+          <div className="absolute inset-0 bg-gradient-to-r from-purple-700/95 via-purple-600/85 to-fuchsia-500/70" />
+          <div className="absolute right-5 top-1/2 hidden -translate-y-1/2 items-end gap-4 md:flex">
+            <div className="grid h-28 w-28 place-items-center rounded-lg bg-white/15 backdrop-blur">
+              <Smartphone className="h-16 w-16 text-white" />
+            </div>
+            <div className="grid h-40 w-48 place-items-center rounded-lg bg-white/15 backdrop-blur">
+              <Gamepad2 className="h-24 w-24 text-white" />
+            </div>
+            <div className="grid h-32 w-32 place-items-center rounded-lg bg-white/15 backdrop-blur">
+              <Laptop className="h-20 w-20 text-white" />
+            </div>
+          </div>
+          <div className="relative flex min-h-[210px] max-w-2xl flex-col justify-center p-6 sm:min-h-[280px] sm:p-8">
+            <p className="mb-3 text-xs font-black uppercase tracking-[0.18em] text-white/80">Satgo Kampanya</p>
+            <h1 className="text-3xl font-black leading-tight sm:text-5xl">{hero.title}</h1>
+            {hero.subtitle && <p className="mt-3 max-w-lg text-sm font-semibold text-white/85 sm:text-base">{hero.subtitle}</p>}
+            <span className="mt-6 inline-flex h-11 w-44 items-center justify-center rounded-full bg-white text-sm font-black text-[#7b2bd4]">
+              Keşfet
+            </span>
+          </div>
+          <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 gap-1.5">
+            {[...Array(9)].map((_, index) => (
+              <span key={index} className={`h-2 rounded-full bg-white/60 ${index === 4 ? 'w-6 bg-white' : 'w-2'}`} />
+            ))}
+          </div>
+        </Link>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-3 pt-4 sm:px-4">
+        <h2 className="mb-2 text-sm font-black text-gray-900">Trend Kategoriler</h2>
+        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+          {trendCategories.map((category) => {
+            const Icon = category.icon
+            return (
+              <Link
+                key={category.label}
+                href={category.href}
+                className={`relative h-16 w-36 shrink-0 overflow-hidden rounded-lg bg-gradient-to-r ${category.tint} p-2 text-white shadow-sm sm:w-40`}
+              >
+                <Icon className="absolute right-3 top-2 h-10 w-10 text-white/75" />
+                <span className="absolute bottom-2 left-2 right-2 text-xs font-black leading-tight">{category.label}</span>
+              </Link>
+            )
+          })}
         </div>
       </section>
-      <section className="mx-auto max-w-7xl px-3 pt-5 sm:px-4 sm:pt-6">
-        <div className="space-y-6">
-          {listingSections
-            .filter((section) => section.listings.length)
-            .map((section) => (
-              <div key={section.key}>
-                <div className="mb-3 flex items-end justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-black text-gray-900 sm:text-xl">{section.title}</h2>
-                    <p className="mt-0.5 text-xs font-semibold text-gray-500 sm:text-sm">{section.subtitle}</p>
-                  </div>
-                  <Link href={section.href} className="shrink-0 text-sm font-black text-brand hover:text-brand-dark">
-                    Tümünü gör
-                  </Link>
-                </div>
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-                  {section.listings.map((listing: any) => (
-                    <ListingCard key={`${section.key}-${listing.id}`} listing={listing} />
-                  ))}
+
+      <section className="mx-auto max-w-4xl px-3 pt-3 sm:px-4">
+        <Link
+          href="/ilan-ver"
+          className="flex min-h-[72px] items-center justify-between gap-4 overflow-hidden rounded-lg bg-gray-950 px-4 py-3 text-white shadow-sm"
+        >
+          <div className="min-w-0">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-brand">Vitrin fırsatı</p>
+            <h2 className="truncate text-lg font-black sm:text-2xl">İlanını dakikalar içinde yayına hazırla</h2>
+            <p className="hidden text-sm font-semibold text-white/70 sm:block">Sat, öne çıkar, daha hızlı alıcı bul.</p>
+          </div>
+          <span className="inline-flex h-10 shrink-0 items-center gap-1 rounded-full bg-white px-4 text-sm font-black text-gray-950">
+            Sat <ChevronRight className="h-4 w-4" />
+          </span>
+        </Link>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-3 pt-5 sm:px-4 sm:pt-7">
+        {loadingSections && (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {[...Array(4)].map((_, index) => (
+              <div key={index} className="overflow-hidden rounded-lg border border-gray-100 bg-white shadow-sm">
+                <div className="aspect-[4/3] animate-pulse bg-gray-100" />
+                <div className="space-y-2 p-3">
+                  <div className="h-4 w-1/2 animate-pulse rounded bg-gray-100" />
+                  <div className="h-3 animate-pulse rounded bg-gray-100" />
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        <div className="space-y-8">
+          {visibleSections.map((section) => (
+            <div key={section.key}>
+              <div className="mb-3 flex items-end justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-black text-gray-900 sm:text-xl">{section.title}</h2>
+                  <p className="mt-0.5 text-xs font-semibold text-gray-500 sm:text-sm">{section.subtitle}</p>
+                </div>
+                <Link href={section.href} className="shrink-0 text-sm font-black text-brand hover:text-brand-dark">
+                  Tümünü gör
+                </Link>
+              </div>
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                {section.listings.map((listing: any) => (
+                  <ListingCard key={`${section.key}-${listing.id}`} listing={listing} />
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
+
+        {!loadingSections && !visibleSections.length && (
+          <div className="rounded-lg border border-dashed border-gray-200 p-10 text-center">
+            <Sparkles className="mx-auto mb-3 h-8 w-8 text-brand" />
+            <h2 className="text-lg font-black text-gray-900">Vitrin ilanları hazırlanıyor</h2>
+            <p className="mt-1 text-sm font-semibold text-gray-500">İlk ilanlar yayına alındığında burada görünecek.</p>
+          </div>
+        )}
       </section>
-      <ListingsPage />
-    </>
+    </main>
   )
 }
