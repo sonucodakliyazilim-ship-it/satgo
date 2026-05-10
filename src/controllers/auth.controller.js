@@ -43,11 +43,132 @@ const getPasswordResetUrl = (token) => {
   return `${frontendUrl}/sifre-yenile?token=${encodeURIComponent(token)}`;
 };
 
+let authSchemaPromise = null;
+
+const ensureAuthSchema = () => {
+  if (!authSchemaPromise) {
+    authSchemaPromise = (async () => {
+      await query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+
+      await query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+            CREATE TYPE user_role AS ENUM ('user', 'admin');
+          END IF;
+
+          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_status') THEN
+            CREATE TYPE user_status AS ENUM ('active', 'banned', 'pending');
+          END IF;
+        END $$;
+      `);
+
+      await query(`
+        CREATE TABLE IF NOT EXISTS users (
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+          name VARCHAR(100) NOT NULL,
+          email VARCHAR(255) UNIQUE NOT NULL,
+          phone VARCHAR(20),
+          password_hash TEXT NOT NULL,
+          avatar_url TEXT,
+          bio TEXT,
+          role user_role NOT NULL DEFAULT 'user',
+          status user_status NOT NULL DEFAULT 'active',
+          city VARCHAR(100),
+          district VARCHAR(100),
+          email_verified BOOLEAN DEFAULT FALSE,
+          phone_verified BOOLEAN DEFAULT FALSE,
+          email_verify_token TEXT,
+          phone_verify_code VARCHAR(6),
+          reset_token TEXT,
+          reset_token_expires TIMESTAMPTZ,
+          rating_avg NUMERIC(3,2) DEFAULT 0,
+          rating_count INTEGER DEFAULT 0,
+          listing_count INTEGER DEFAULT 0,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await query(`
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS name VARCHAR(100),
+          ADD COLUMN IF NOT EXISTS email VARCHAR(255),
+          ADD COLUMN IF NOT EXISTS password_hash TEXT,
+          ADD COLUMN IF NOT EXISTS phone VARCHAR(20),
+          ADD COLUMN IF NOT EXISTS avatar_url TEXT,
+          ADD COLUMN IF NOT EXISTS bio TEXT,
+          ADD COLUMN IF NOT EXISTS role user_role NOT NULL DEFAULT 'user',
+          ADD COLUMN IF NOT EXISTS status user_status NOT NULL DEFAULT 'active',
+          ADD COLUMN IF NOT EXISTS city VARCHAR(100),
+          ADD COLUMN IF NOT EXISTS district VARCHAR(100),
+          ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE,
+          ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE,
+          ADD COLUMN IF NOT EXISTS email_verify_token TEXT,
+          ADD COLUMN IF NOT EXISTS phone_verify_code VARCHAR(6),
+          ADD COLUMN IF NOT EXISTS reset_token TEXT,
+          ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS rating_avg NUMERIC(3,2) DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS rating_count INTEGER DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS listing_count INTEGER DEFAULT 0,
+          ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      `);
+
+      await query("UPDATE users SET role = 'user' WHERE role IS NULL");
+      await query("UPDATE users SET status = 'active' WHERE status IS NULL");
+
+      await query(`
+        DO $$
+        DECLARE
+          user_id_type text;
+        BEGIN
+          SELECT format_type(a.atttypid, a.atttypmod)
+          INTO user_id_type
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'public'
+            AND c.relname = 'users'
+            AND a.attname = 'id'
+            AND a.attnum > 0
+            AND NOT a.attisdropped;
+
+          IF user_id_type IS NULL THEN
+            RAISE EXCEPTION 'users.id column is required before auth schema can run';
+          END IF;
+
+          EXECUTE format($sql$
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              user_id %s NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              token TEXT NOT NULL,
+              expires_at TIMESTAMPTZ NOT NULL,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+          $sql$, user_id_type);
+        END $$;
+      `);
+
+      await query('CREATE UNIQUE INDEX IF NOT EXISTS idx_refresh_tokens_token_unique ON refresh_tokens(token)');
+      await query('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)');
+      await query('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');
+      await query('CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)');
+    })().catch((err) => {
+      authSchemaPromise = null;
+      throw err;
+    });
+  }
+
+  return authSchemaPromise;
+};
+
 // ── Controllers ───────────────────────────────────────────────
 
 // POST /api/auth/register
 const register = async (req, res, next) => {
   try {
+    await ensureAuthSchema();
     const { name, email, password, phone, city } = req.body;
 
     // Check existing email
@@ -88,6 +209,7 @@ const register = async (req, res, next) => {
 // POST /api/auth/login
 const login = async (req, res, next) => {
   try {
+    await ensureAuthSchema();
     const { email, password } = req.body;
 
     const { rows } = await query(
@@ -128,6 +250,7 @@ const login = async (req, res, next) => {
 // POST /api/auth/refresh
 const refresh = async (req, res, next) => {
   try {
+    await ensureAuthSchema();
     const refreshToken = getRefreshTokenFromRequest(req);
     if (!refreshToken) {
       return res.status(400).json({ success: false, message: 'Refresh token gerekli.' });
@@ -169,6 +292,7 @@ const refresh = async (req, res, next) => {
 // POST /api/auth/logout
 const logout = async (req, res, next) => {
   try {
+    await ensureAuthSchema();
     const refreshToken = getRefreshTokenFromRequest(req);
     if (refreshToken) {
       await query('DELETE FROM refresh_tokens WHERE token = $1', [refreshToken]);
@@ -183,6 +307,7 @@ const logout = async (req, res, next) => {
 // POST /api/auth/forgot-password
 const forgotPassword = async (req, res, next) => {
   try {
+    await ensureAuthSchema();
     const { email } = req.body;
     const { rows } = await query('SELECT id FROM users WHERE email = $1', [email]);
 
@@ -219,6 +344,7 @@ const forgotPassword = async (req, res, next) => {
 // POST /api/auth/reset-password
 const resetPassword = async (req, res, next) => {
   try {
+    await ensureAuthSchema();
     const { token, password } = req.body;
 
     const { rows } = await query(
@@ -248,6 +374,7 @@ const resetPassword = async (req, res, next) => {
 
 const changePassword = async (req, res, next) => {
   try {
+    await ensureAuthSchema();
     const { currentPassword, password } = req.body;
     const { rows } = await query('SELECT id, password_hash FROM users WHERE id = $1', [req.user.id]);
     if (!rows.length) return res.status(404).json({ success: false, message: 'Kullanıcı bulunamadı.' });

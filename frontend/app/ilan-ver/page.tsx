@@ -341,8 +341,32 @@ export default function CreateListingPage() {
   }
 
   const chooseFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(e.target.files || []).slice(0, 10 - files.length)
-    setFiles((current) => [...current, ...selected].slice(0, 10))
+    const selected = Array.from(e.target.files || [])
+    const maxBytes = 15 * 1024 * 1024
+    const accepted = selected.filter(
+      (file) =>
+        file.type.startsWith('image/') ||
+        /\.(jpe?g|jfif|png|webp|avif|gif|heic|heif)$/i.test(file.name),
+    )
+    const sized = accepted.filter((file) => file.size <= maxBytes)
+    const room = Math.max(10 - files.length, 0)
+
+    if (!room) {
+      toast.error('En fazla 10 fotoğraf yükleyebilirsin.')
+      e.target.value = ''
+      return
+    }
+
+    if (accepted.length !== selected.length) {
+      toast.error('Sadece görsel dosyaları yüklenebilir.')
+    }
+
+    if (sized.length !== accepted.length) {
+      toast.error('Fotoğraf boyutu en fazla 15 MB olabilir.')
+    }
+
+    setFiles((current) => [...current, ...sized.slice(0, room)])
+    e.target.value = ''
   }
 
   const setGenericLevel = (level: number, value: string) => {
@@ -445,13 +469,25 @@ export default function CreateListingPage() {
       }
 
       const { data } = await listingsApi.create(payload)
+      const listingId = data.data.id
+
       if (files.length) {
         const fd = new FormData()
         files.forEach((file) => fd.append('images', file))
-        await uploadApi.uploadImages(data.data.id, fd)
+
+        try {
+          await uploadApi.uploadImages(listingId, fd)
+        } catch (uploadErr: any) {
+          toast.error(
+            uploadErr?.response?.data?.message ||
+              'İlan oluşturuldu ama fotoğraflar yüklenemedi. İlan detayından tekrar deneyebilirsin.',
+          )
+          router.push(`/ilan/${listingId}`)
+          return
+        }
       }
       toast.success('İlan oluşturuldu')
-      router.push(`/ilan/${data.data.id}`)
+      router.push(`/ilan/${listingId}`)
     } catch (err: any) {
       if (err?.response?.status === 401) {
         setUser(null)
@@ -685,7 +721,7 @@ export default function CreateListingPage() {
           <label className="border-2 border-dashed border-gray-200 rounded-xl p-5 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-brand transition-colors">
             <ImagePlus className="w-7 h-7 text-brand" />
             <span className="text-sm font-semibold">Fotoğraf seç veya sürükle</span>
-            <span className="text-xs text-gray-400">En fazla 10 adet JPG, PNG veya WEBP</span>
+            <span className="text-xs text-gray-400">En fazla 10 adet JPG, PNG, WEBP, AVIF veya HEIC</span>
             <input type="file" multiple accept="image/*" onChange={chooseFiles} className="hidden" />
           </label>
           {!!previews.length && (

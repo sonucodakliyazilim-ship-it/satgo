@@ -133,9 +133,17 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).json({
+  const status = err.status || err.statusCode || (err.name === 'MulterError' ? 400 : 500);
+  const message =
+    err.code === 'LIMIT_FILE_SIZE'
+      ? 'Fotoğraf boyutu en fazla 15 MB olabilir.'
+      : err.code === 'LIMIT_FILE_COUNT'
+        ? 'En fazla 10 fotoğraf yükleyebilirsiniz.'
+        : err.message || 'Sunucu hatası.';
+
+  res.status(status).json({
     success: false,
-    message: err.message || 'Sunucu hatası.',
+    message,
   });
 });
 

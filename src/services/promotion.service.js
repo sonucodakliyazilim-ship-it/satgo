@@ -92,14 +92,25 @@ const refreshExpiredPromotions = async ({ force = false } = {}) => {
   if (promotionRefreshPromise) return promotionRefreshPromise;
 
   promotionRefreshPromise = (async () => {
-  await query(
+  const expired = await query(
     `UPDATE listing_promotions
      SET status = 'expired'
      WHERE payment_status = 'completed'
        AND status = 'active'
        AND ends_at IS NOT NULL
-       AND ends_at <= NOW()`,
+       AND ends_at <= NOW()
+     RETURNING listing_id`,
   );
+
+  const expiredListingIds = [...new Set(expired.rows.map((row) => row.listing_id).filter(Boolean))];
+
+  if (!force && !expiredListingIds.length) {
+    lastPromotionRefreshAt = Date.now();
+    return;
+  }
+
+  const idCondition = force ? '' : 'WHERE l.id = ANY($1::uuid[])';
+  const params = force ? [] : [expiredListingIds];
 
   await query(
     `UPDATE listings l SET
@@ -144,7 +155,9 @@ const refreshExpiredPromotions = async ({ force = false } = {}) => {
          WHERE lp.listing_id = l.id AND lp.type = 'boost'
            AND lp.payment_status = 'completed' AND lp.status = 'active'
            AND lp.ends_at > NOW()
-       )`,
+       )
+     ${idCondition}`,
+    params,
   );
 
     lastPromotionRefreshAt = Date.now();

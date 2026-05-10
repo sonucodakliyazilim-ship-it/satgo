@@ -11,8 +11,11 @@ const getUploadRoot = () =>
 
 const extensionByMime = {
   'image/jpeg': '.jpg',
+  'image/pjpeg': '.jpg',
   'image/png': '.png',
   'image/webp': '.webp',
+  'image/avif': '.avif',
+  'image/gif': '.gif',
 };
 
 const saveBannerImage = async (file) => {
@@ -56,14 +59,18 @@ const ensureBannerTable = async () => {
 const uploadBanner = multer({
   storage: multer.memoryStorage(),
   fileFilter: (req, file, cb) => {
-    const allowedExts = ['.jpg', '.jpeg', '.png', '.webp'];
-    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
+    const allowedExts = ['.jpg', '.jpeg', '.jfif', '.png', '.webp', '.avif', '.gif'];
+    const allowedMimes = ['image/jpeg', 'image/pjpeg', 'image/png', 'image/webp', 'image/avif', 'image/gif'];
     const ext = path.extname(file.originalname).toLowerCase();
 
-    if (allowedExts.includes(ext) && allowedMimes.includes(file.mimetype)) cb(null, true);
-    else cb(new Error('Sadece JPG, PNG ve WEBP dosyalari kabul edilir.'), false);
+    if (allowedExts.includes(ext) && allowedMimes.includes((file.mimetype || '').toLowerCase())) cb(null, true);
+    else {
+      const err = new Error('Sadece JPG, PNG, WEBP, AVIF veya GIF dosyalari kabul edilir.');
+      err.status = 400;
+      cb(err, false);
+    }
   },
-  limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 },
+  limits: { fileSize: Math.max(parseInt(process.env.MAX_FILE_SIZE || '', 10) || 0, 15 * 1024 * 1024) },
 });
 
 const getPublicBanners = async (req, res, next) => {

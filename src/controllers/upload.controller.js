@@ -14,8 +14,13 @@ const getUploadRoot = () =>
 
 const extensionByMime = {
   'image/jpeg': '.jpg',
+  'image/pjpeg': '.jpg',
   'image/png': '.png',
   'image/webp': '.webp',
+  'image/avif': '.avif',
+  'image/gif': '.gif',
+  'image/heic': '.heic',
+  'image/heif': '.heif',
 };
 
 const saveListingImage = async (listingId, file) => {
@@ -42,20 +47,85 @@ const resolveStoredUploadPath = (url) => {
   return filePath;
 };
 
-const fileFilter = (req, file, cb) => {
-  const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
-  const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
-  const ext = path.extname(file.originalname).toLowerCase();
-  if (allowed.includes(ext) && allowedMimes.includes(file.mimetype)) cb(null, true);
-  else cb(new Error('Sadece JPG, PNG ve WEBP dosyaları kabul edilir.'), false);
+let uploadSchemaPromise = null;
+
+const ensureUploadSchema = () => {
+  if (!uploadSchemaPromise) {
+    uploadSchemaPromise = (async () => {
+      await query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+      await query(`
+        DO $$
+        DECLARE
+          listing_id_type text;
+        BEGIN
+          SELECT format_type(a.atttypid, a.atttypmod)
+          INTO listing_id_type
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'public'
+            AND c.relname = 'listings'
+            AND a.attname = 'id'
+            AND a.attnum > 0
+            AND NOT a.attisdropped;
+
+          IF listing_id_type IS NULL THEN
+            RAISE EXCEPTION 'listings.id column is required before upload schema can run';
+          END IF;
+
+          EXECUTE format($sql$
+            CREATE TABLE IF NOT EXISTS listing_images (
+              id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+              listing_id %s NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
+              url TEXT NOT NULL,
+              sort_order INTEGER DEFAULT 0,
+              is_primary BOOLEAN DEFAULT FALSE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+          $sql$, listing_id_type);
+        END $$;
+      `);
+      await query('ALTER TABLE listing_images ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0');
+      await query('ALTER TABLE listing_images ADD COLUMN IF NOT EXISTS is_primary BOOLEAN DEFAULT FALSE');
+      await query('ALTER TABLE listing_images ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()');
+      await query('CREATE INDEX IF NOT EXISTS idx_listing_images_listing ON listing_images(listing_id)');
+      await query('CREATE INDEX IF NOT EXISTS idx_listing_images_primary ON listing_images(listing_id, is_primary)');
+    })().catch((err) => {
+      uploadSchemaPromise = null;
+      throw err;
+    });
+  }
+
+  return uploadSchemaPromise;
 };
+
+const fileFilter = (req, file, cb) => {
+  const allowed = ['.jpg', '.jpeg', '.jfif', '.png', '.webp', '.avif', '.gif', '.heic', '.heif'];
+  const allowedMimes = ['image/jpeg', 'image/pjpeg', 'image/png', 'image/webp', 'image/avif', 'image/gif', 'image/heic', 'image/heif'];
+  const ext = path.extname(file.originalname).toLowerCase();
+  const mime = (file.mimetype || '').toLowerCase();
+
+  if ((allowed.includes(ext) && (allowedMimes.includes(mime) || mime.startsWith('image/'))) || (!ext && allowedMimes.includes(mime))) {
+    cb(null, true);
+    return;
+  }
+
+  const err = new Error('Sadece JPG, PNG, WEBP, AVIF, GIF veya HEIC/HEIF görsel dosyaları kabul edilir.');
+  err.status = 400;
+  cb(err, false);
+};
+
+const configuredMaxFileSize = parseInt(process.env.MAX_FILE_SIZE || '', 10);
+const maxListingFileSize = Number.isFinite(configuredMaxFileSize)
+  ? Math.max(configuredMaxFileSize, 15 * 1024 * 1024)
+  : 15 * 1024 * 1024;
 
 const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024, // 5MB
-    files:    parseInt(process.env.MAX_FILES_PER_LISTING) || 10,
+    fileSize: maxListingFileSize,
+    files:    parseInt(process.env.MAX_FILES_PER_LISTING, 10) || 10,
   },
 });
 
@@ -64,6 +134,7 @@ const upload = multer({
 // POST /api/upload/listing-images/:listingId
 const uploadListingImages = async (req, res, next) => {
   try {
+    await ensureUploadSchema();
     const { listingId } = req.params;
 
     // Verify ownership
@@ -79,8 +150,8 @@ const uploadListingImages = async (req, res, next) => {
 
     // Check existing image count
     const existing = await query('SELECT COUNT(*) FROM listing_images WHERE listing_id = $1', [listingId]);
-    const max = parseInt(process.env.MAX_FILES_PER_LISTING) || 10;
-    if (parseInt(existing.rows[0].count) + req.files.length > max) {
+    const max = parseInt(process.env.MAX_FILES_PER_LISTING, 10) || 10;
+    if (parseInt(existing.rows[0].count, 10) + req.files.length > max) {
       return res.status(400).json({ success: false, message: `En fazla ${max} fotoğraf yükleyebilirsiniz.` });
     }
 
@@ -108,6 +179,7 @@ const uploadListingImages = async (req, res, next) => {
 // DELETE /api/upload/listing-images/:imageId
 const deleteListingImage = async (req, res, next) => {
   try {
+    await ensureUploadSchema();
     const { imageId } = req.params;
     const { rows } = await query(
       `SELECT li.*, l.user_id FROM listing_images li
@@ -150,6 +222,7 @@ const deleteListingImage = async (req, res, next) => {
 // PATCH /api/upload/listing-images/:imageId/primary
 const setPrimaryImage = async (req, res, next) => {
   try {
+    await ensureUploadSchema();
     const { imageId } = req.params;
     const img = await query(
       'SELECT li.listing_id, l.user_id FROM listing_images li JOIN listings l ON l.id = li.listing_id WHERE li.id = $1',
