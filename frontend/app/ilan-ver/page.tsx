@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { categoriesApi, hierarchyApi, listingsApi, uploadApi } from '@/lib/api'
+import { categoriesApi, customFieldsApi, hierarchyApi, listingsApi, uploadApi } from '@/lib/api'
 import { defaultCategories } from '@/lib/defaultCategories'
 import { useAuthStore } from '@/lib/store'
 import cities from '@/lib/cities.json'
@@ -172,7 +172,7 @@ const getHierarchyGroup = (category?: any) => {
 }
 
 const getLevelLabel = (group: string, level: number) =>
-  HIERARCHY_LABELS[group]?.[level] || `${level + 1}. seviye`
+  HIERARCHY_LABELS[group]?.[level] || `Başlık ${level + 1}`
 
 const getNodePath = (nodes: HierarchyNode[], labels: string[]) => {
   const path: HierarchyNode[] = []
@@ -197,6 +197,9 @@ export default function CreateListingPage() {
   const [genericTree, setGenericTree] = useState<HierarchyNode[]>([])
   const [genericSelections, setGenericSelections] = useState<string[]>([])
   const [hierarchyLoading, setHierarchyLoading] = useState(false)
+  const [groupLabels, setGroupLabels] = useState<Record<string, string[]>>({})
+  const [customFields, setCustomFields] = useState<any[]>([])
+  const [customFieldValues, setCustomFieldValues] = useState<Record<string, any>>({})
   const [files, setFiles] = useState<File[]>([])
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
@@ -272,6 +275,11 @@ export default function CreateListingPage() {
   const selectedCategory = categories.find((c) => String(c.id) === form.category_id)
   const selectedHierarchyGroup = getHierarchyGroup(selectedCategory)
 
+  const effectiveLevelLabel = (level: number) => {
+    const override = groupLabels[selectedHierarchyGroup]?.[level]
+    return override || getLevelLabel(selectedHierarchyGroup, level)
+  }
+
   useEffect(() => {
     if (!selectedHierarchyGroup || selectedHierarchyGroup === 'vehicle' || selectedHierarchyGroup === 'motor') {
       setGenericTree([])
@@ -286,6 +294,40 @@ export default function CreateListingPage() {
       .catch(() => setGenericTree([]))
       .finally(() => setHierarchyLoading(false))
   }, [selectedHierarchyGroup])
+
+  useEffect(() => {
+    if (!selectedHierarchyGroup) return
+    hierarchyApi
+      .getGroupSettings(selectedHierarchyGroup)
+      .then(({ data }) => {
+        const labels = data.data?.level_labels || []
+        setGroupLabels((current) => ({ ...current, [selectedHierarchyGroup]: labels }))
+      })
+      .catch(() => {})
+  }, [selectedHierarchyGroup])
+
+  useEffect(() => {
+    if (!form.category_id) {
+      setCustomFields([])
+      setCustomFieldValues({})
+      return
+    }
+    customFieldsApi
+      .getForCategory(form.category_id, form.sub_category_id || undefined)
+      .then(({ data }) => {
+        setCustomFields(data.data || [])
+        setCustomFieldValues((prev) => {
+          const next: any = {}
+          for (const f of data.data || []) {
+            if (prev[f.id] !== undefined) next[f.id] = prev[f.id]
+          }
+          return next
+        })
+      })
+      .catch(() => {
+        setCustomFields([])
+      })
+  }, [form.category_id, form.sub_category_id])
 
   const selectedCity = (cities as any[]).find((c) => c.cityName === form.city)
   const selectedVehicleBrand = vehicleTree.find((item) => item.label === form.vehicle_brand)
@@ -408,6 +450,9 @@ export default function CreateListingPage() {
         hierarchy_group: selectedHierarchyGroup || undefined,
         hierarchy_labels: hierarchyLabels,
         hierarchy_path: hierarchyPath,
+        custom_fields: customFields
+          .map((f: any) => ({ field_id: f.id, value: customFieldValues[f.id] }))
+          .filter((x: any) => x.value !== undefined && x.value !== ''),
       }
 
       if (selectedCategory?.slug === 'arac') {
@@ -478,10 +523,13 @@ export default function CreateListingPage() {
         try {
           await uploadApi.uploadImages(listingId, fd)
         } catch (uploadErr: any) {
-          toast.error(
-            uploadErr?.response?.data?.message ||
-              'İlan oluşturuldu ama fotoğraflar yüklenemedi. İlan detayından tekrar deneyebilirsin.',
-          )
+          const uploadMessage =
+            uploadErr?.code === 'ECONNABORTED'
+              ? 'Fotoğraf yükleme zaman aşımına uğradı. Daha az fotoğrafla veya daha küçük dosyalarla tekrar deneyebilirsin.'
+              : uploadErr?.response?.data?.message ||
+                'İlan oluşturuldu ama fotoğraflar yüklenemedi. İlan detayından tekrar deneyebilirsin.'
+
+          toast.error(uploadMessage)
           router.push(`/ilan/${listingId}`)
           return
         }
@@ -568,15 +616,75 @@ export default function CreateListingPage() {
               genericLevels.map((levelOptions, level) => (
                 <Select
                   key={`${selectedHierarchyGroup}-${level}`}
-                  label={getLevelLabel(selectedHierarchyGroup, level)}
+                  label={effectiveLevelLabel(level)}
                   value={genericSelections[level] || ''}
                   onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setGenericLevel(level, e.target.value)}
                   options={[
-                    ['', `${getLevelLabel(selectedHierarchyGroup, level)} seç`],
+                    ['', `${effectiveLevelLabel(level)} seç`],
                     ...levelOptions.map((item) => [item.label, item.label]),
                   ]}
                 />
               ))}
+          </div>
+        )}
+
+        {!!customFields.length && (
+          <div className="bg-gray-50 rounded-xl p-4 grid md:grid-cols-2 gap-3">
+            <h2 className="font-bold md:col-span-2">Ek Alanlar</h2>
+            {customFields.map((f: any) => {
+              const value = customFieldValues[f.id] ?? ''
+              const required = !!f.is_required
+              if (f.field_type === 'select') {
+                return (
+                  <Select
+                    key={f.id}
+                    label={`${f.label}${required ? ' *' : ''}`}
+                    value={value}
+                    onChange={(e: any) => setCustomFieldValues((curr) => ({ ...curr, [f.id]: e.target.value }))}
+                    options={[
+                      ['', `${f.label} seç`],
+                      ...(f.options || []).map((o: any) => [o.value, o.label]),
+                    ]}
+                  />
+                )
+              }
+              if (f.field_type === 'boolean') {
+                return (
+                  <Select
+                    key={f.id}
+                    label={`${f.label}${required ? ' *' : ''}`}
+                    value={value}
+                    onChange={(e: any) => setCustomFieldValues((curr) => ({ ...curr, [f.id]: e.target.value }))}
+                    options={[
+                      ['', `${f.label} seç`],
+                      ['true', 'Evet'],
+                      ['false', 'Hayır'],
+                    ]}
+                  />
+                )
+              }
+              if (f.field_type === 'number') {
+                return (
+                  <Field
+                    key={f.id}
+                    label={`${f.label}${required ? ' *' : ''}`}
+                    value={value}
+                    onChange={(e: any) => setCustomFieldValues((curr) => ({ ...curr, [f.id]: e.target.value }))}
+                    type="number"
+                    required={required}
+                  />
+                )
+              }
+              return (
+                <Field
+                  key={f.id}
+                  label={`${f.label}${required ? ' *' : ''}`}
+                  value={value}
+                  onChange={(e: any) => setCustomFieldValues((curr) => ({ ...curr, [f.id]: e.target.value }))}
+                  required={required}
+                />
+              )
+            })}
           </div>
         )}
 

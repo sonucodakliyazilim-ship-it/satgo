@@ -69,6 +69,13 @@ export default function HierarchyManager() {
   const [group, setGroup] = useState('vehicle')
   const [groups, setGroups] = useState<GroupOption[]>(defaultGroups)
   const [nodes, setNodes] = useState<Node[]>([])
+  const [levelLabels, setLevelLabels] = useState<string[]>([])
+  const [groupLabel, setGroupLabel] = useState('')
+  const [groupHint, setGroupHint] = useState('')
+  const [newGroupKey, setNewGroupKey] = useState('')
+  const [newGroupLabel, setNewGroupLabel] = useState('')
+  const [newGroupHint, setNewGroupHint] = useState('')
+  const [savingLabels, setSavingLabels] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [csvText, setCsvText] = useState(sampleCsv)
@@ -94,6 +101,33 @@ export default function HierarchyManager() {
     }
   }
 
+  const loadLabels = async () => {
+    try {
+      const { data } = await hierarchyApi.getGroupSettings(group)
+      setLevelLabels(data.data?.level_labels || [])
+      setGroupLabel(data.data?.group_label || '')
+      setGroupHint(data.data?.group_hint || '')
+    } catch {
+      setLevelLabels([])
+      setGroupLabel('')
+      setGroupHint('')
+    }
+  }
+
+  const loadGroupSettings = async () => {
+    try {
+      const { data } = await hierarchyApi.listGroupSettings()
+      const dbGroups = (data.data || []).map((item: any) => ({
+        value: item.group_key,
+        label: item.group_label || item.group_key,
+        hint: item.group_hint || '',
+      }))
+      setGroups((current) =>
+        [...current, ...dbGroups].filter((item, index, list) => list.findIndex((x) => x.value === item.value) === index),
+      )
+    } catch {}
+  }
+
   useEffect(() => {
     categoriesApi
       .getAll()
@@ -109,10 +143,12 @@ export default function HierarchyManager() {
         setGroups(merged)
       })
       .catch(() => setGroups(defaultGroups))
+    loadGroupSettings()
   }, [])
 
   useEffect(() => {
     load()
+    loadLabels()
   }, [group])
 
   const reset = () => {
@@ -190,6 +226,59 @@ export default function HierarchyManager() {
     setCsvText(await file.text())
   }
 
+  const saveLabels = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSavingLabels(true)
+    try {
+      await hierarchyApi.updateGroupSettings({
+        group_key: group,
+        group_label: groupLabel,
+        group_hint: groupHint,
+        level_labels: levelLabels,
+      })
+      toast.success('Veri grubu ve seviye isimleri güncellendi')
+      setGroups((current) =>
+        current.map((item) =>
+          item.value === group
+            ? { ...item, label: groupLabel || item.label, hint: groupHint || item.hint }
+            : item,
+        ),
+      )
+      loadLabels()
+      loadGroupSettings()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Ayarlar kaydedilemedi')
+    } finally {
+      setSavingLabels(false)
+    }
+  }
+
+  const createGroup = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const key = newGroupKey.trim()
+    if (!key) {
+      toast.error('Veri grubu anahtarı gerekli')
+      return
+    }
+    try {
+      await hierarchyApi.updateGroupSettings({
+        group_key: key,
+        group_label: newGroupLabel.trim() || key,
+        group_hint: newGroupHint.trim() || null,
+        level_labels: [],
+      })
+      toast.success('Yeni veri grubu eklendi')
+      setNewGroupKey('')
+      setNewGroupLabel('')
+      setNewGroupHint('')
+      await loadGroupSettings()
+      setGroup(key)
+      reset()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Veri grubu eklenemedi')
+    }
+  }
+
   return (
     <section className="overflow-hidden rounded-lg border border-gray-200 bg-white">
       <div className="grid gap-4 border-b border-gray-100 p-4 xl:grid-cols-[1fr_320px]">
@@ -228,6 +317,69 @@ export default function HierarchyManager() {
           </select>
           <p className="mt-2 rounded-lg bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">{activeGroup?.hint}</p>
         </div>
+      </div>
+
+      <div className="border-b border-gray-100 p-4 bg-gray-50">
+        <form onSubmit={saveLabels} className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_1fr_auto] lg:items-end">
+          <div className="lg:col-span-5">
+            <h3 className="font-black">Seviye İsimleri (İlan Ver ekranında görünen başlıklar)</h3>
+            <p className="mt-1 text-xs font-semibold text-gray-500">
+              Örn: “Seviye 1” yerine “Marka / Tür / Model” gibi isimler yazabilirsiniz.
+            </p>
+          </div>
+          <div>
+            <label className="label">Veri grubu adı</label>
+            <input value={groupLabel} onChange={(e) => setGroupLabel(e.target.value)} className="input bg-white" placeholder="Örn: Ticari Araçlar" />
+          </div>
+          <div className="lg:col-span-2">
+            <label className="label">Kısa açıklama</label>
+            <input value={groupHint} onChange={(e) => setGroupHint(e.target.value)} className="input bg-white" placeholder="Örn: Marka > Seri > Model > Paket" />
+          </div>
+          {[0, 1, 2, 3].map((idx) => (
+            <div key={idx}>
+              <label className="label">{idx + 1}. seviye</label>
+              <input
+                value={levelLabels[idx] || ''}
+                onChange={(e) =>
+                  setLevelLabels((current) => {
+                    const next = [...current]
+                    next[idx] = e.target.value
+                    return next
+                  })
+                }
+                className="input bg-white"
+                placeholder={`Seviye ${idx + 1} adı`}
+              />
+            </div>
+          ))}
+          <button disabled={savingLabels} className="btn-brand flex items-center gap-2 whitespace-nowrap">
+            <Save className="h-4 w-4" />
+            {savingLabels ? 'Kaydediliyor...' : 'Kaydet'}
+          </button>
+        </form>
+      </div>
+
+      <div className="border-b border-gray-100 p-4">
+        <form onSubmit={createGroup} className="grid gap-3 lg:grid-cols-[180px_1fr_1fr_auto] lg:items-end">
+          <div>
+            <label className="label">Yeni grup key</label>
+            <input
+              value={newGroupKey}
+              onChange={(e) => setNewGroupKey(e.target.value)}
+              className="input"
+              placeholder="orn: ticari-araclar"
+            />
+          </div>
+          <div>
+            <label className="label">Yeni grup adı</label>
+            <input value={newGroupLabel} onChange={(e) => setNewGroupLabel(e.target.value)} className="input" placeholder="Örn: Ticari Araçlar" />
+          </div>
+          <div>
+            <label className="label">Açıklama</label>
+            <input value={newGroupHint} onChange={(e) => setNewGroupHint(e.target.value)} className="input" placeholder="Örn: Marka > Model > Seri > Paket" />
+          </div>
+          <button type="submit" className="btn-outline whitespace-nowrap">Veri Grubu Ekle</button>
+        </form>
       </div>
 
       <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_420px]">

@@ -189,10 +189,21 @@ export const categoriesApi = {
 
 export const hierarchyApi = {
   getTree: (group = 'vehicle') => api.get('/hierarchy', { params: { group } }),
+  listGroupSettings: () => api.get('/hierarchy/group-settings'),
+  getGroupSettings: (group = 'vehicle') => api.get('/hierarchy/group-settings', { params: { group } }),
+  updateGroupSettings: (d: any) => api.patch('/hierarchy/group-settings', d),
   create: (d: any) => api.post('/hierarchy', d),
   update: (id: string, d: any) => api.patch(`/hierarchy/${id}`, d),
   delete: (id: string) => api.delete(`/hierarchy/${id}`),
   importCsv: (d: any) => api.post('/hierarchy/import', d),
+}
+
+export const customFieldsApi = {
+  getForCategory: (category_id: string | number, sub_category_id?: string | number) =>
+    api.get('/custom-fields', { params: { category_id, sub_category_id } }),
+  adminList: () => api.get('/custom-fields/admin'),
+  adminUpsert: (d: any) => api.post('/custom-fields/admin', d),
+  adminDelete: (id: string) => api.delete(`/custom-fields/admin/${id}`),
 }
 
 export const favoritesApi = {
@@ -217,7 +228,7 @@ export const promotionsApi = {
 
 export const uploadApi = {
   uploadImages: (listingId: string, files: FormData) =>
-    api.post(`/upload/listing-images/${listingId}`, files),
+    api.post(`/upload/listing-images/${listingId}`, files, { timeout: 120000 }),
   deleteImage: (imageId: string) => api.delete(`/upload/listing-images/${imageId}`),
   setPrimary: (imageId: string) => api.patch(`/upload/listing-images/${imageId}/primary`),
 }

@@ -12,7 +12,6 @@ import {
   ChevronDown,
   ChevronRight,
   CircleDollarSign,
-  Gem,
   Grid3X3,
   Heart,
   Home,
@@ -26,14 +25,13 @@ import {
   Shirt,
   ShoppingBag,
   Smartphone,
+  Gem,
   Sparkles,
   Trophy,
   Truck,
-  User,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { categoriesApi, hierarchyApi } from '@/lib/api'
-import { defaultCategories } from '@/lib/defaultCategories'
 import { useAuthStore } from '@/lib/store'
 import { findNearestCity, getDistricts, LOCATIONS } from '@/lib/locations'
 
@@ -41,14 +39,6 @@ type CategoryColumn = {
   title: string
   items?: string[]
   href?: string
-}
-
-type MegaCategory = {
-  label: string
-  href: string
-  icon: any
-  color: string
-  columns: CategoryColumn[]
 }
 
 type NavCategory = {
@@ -64,162 +54,6 @@ type HierarchyNode = {
   label: string
   children?: HierarchyNode[]
 }
-
-const searchHref = (term: string) => `/ilanlar?search=${encodeURIComponent(term)}`
-
-const MEGA_CATEGORIES: MegaCategory[] = [
-  {
-    label: 'Araba',
-    href: '/ilanlar?kategori=arac',
-    icon: Car,
-    color: 'bg-blue-600',
-    columns: [
-      { title: 'Otomobil', items: ['BMW', 'Mercedes-Benz', 'Audi', 'Volkswagen', 'Renault', 'Fiat', 'Toyota', 'Honda', 'Hyundai', 'Ford'] },
-      { title: 'Arazi & SUV', items: ['SUV & 4x4', 'Pickup', 'Crossover', 'Jeep'] },
-      { title: 'Ticari Araç', items: ['Panelvan', 'Kamyonet', 'Minibüs', 'Otobüs'] },
-    ],
-  },
-  {
-    label: 'Telefon',
-    href: searchHref('telefon'),
-    icon: Smartphone,
-    color: 'bg-violet-500',
-    columns: [
-      { title: 'iPhone iOS Telefon', items: ['iPhone 17 Pro Max', 'iPhone 17 Pro', 'iPhone 11', 'iPhone 13', 'iPhone 16 Pro Max', 'iPhone 15 Pro Max', 'iPhone 14 Pro Max', 'iPhone 12', 'iPhone 16 Pro', 'iPhone 15 Pro', 'iPhone 15', 'iPhone 13 Pro Max', 'iPhone 16'] },
-      { title: 'Android Telefon', items: ['Samsung', 'Xiaomi', 'Huawei', 'Oppo', 'Poco', 'Infinix', 'Tecno', 'Realme', 'Vivo'] },
-      { title: 'Telefon Aksesuarları', items: ['Şarj Cihazı', 'Bluetooth Kulaklık', 'Kablolu Kulaklık', 'Telefon Kılıfı', 'Ekran Koruyucu', 'Selfie Çubuğu & Stand'] },
-      { title: 'Telefon Yedek Parçaları', items: ['Batarya', 'Ekran', 'Anakart', 'Kasa & Kapak', 'Diğer'] },
-      { title: 'Diğer Cep Telefonları', href: searchHref('cep telefonu') },
-      { title: 'Telsiz & Masaüstü Telefon', href: searchHref('masaüstü telefon') },
-    ],
-  },
-  {
-    label: 'Elektronik',
-    href: '/ilanlar?kategori=elektronik',
-    icon: Home,
-    color: 'bg-teal-400',
-    columns: [
-      { title: 'Bilgisayar', items: ['Laptop', 'Masaüstü', 'Monitör', 'Tablet', 'Yazıcı'] },
-      { title: 'TV & Ses', items: ['Televizyon', 'Hoparlör', 'Kulaklık', 'Ev Sinema Sistemi'] },
-      { title: 'Oyun & Konsol', items: ['PlayStation', 'Xbox', 'Nintendo', 'Oyun Aksesuarı'] },
-    ],
-  },
-  {
-    label: 'Ev & Yaşam',
-    href: '/ilanlar?kategori=ev-esyasi',
-    icon: Home,
-    color: 'bg-yellow-400',
-    columns: [
-      { title: 'Mobilya', items: ['Koltuk', 'Masa', 'Sandalye', 'Dolap', 'Yatak'] },
-      { title: 'Beyaz Eşya', items: ['Buzdolabı', 'Çamaşır Makinesi', 'Bulaşık Makinesi', 'Fırın'] },
-      { title: 'Dekorasyon', items: ['Halı', 'Aydınlatma', 'Perde', 'Tablo'] },
-    ],
-  },
-  {
-    label: 'Motosiklet',
-    href: '/ilanlar?kategori=motor',
-    icon: Bike,
-    color: 'bg-orange-500',
-    columns: [
-      { title: 'Motosiklet', items: ['Scooter', 'Naked', 'Touring', 'Enduro', 'Chopper'] },
-      { title: 'Ekipman', items: ['Kask', 'Mont', 'Eldiven', 'Çanta'] },
-      { title: 'Yedek Parça', items: ['Lastik', 'Akü', 'Egzoz', 'Ayna'] },
-    ],
-  },
-  {
-    label: 'Giyim & Aksesuar',
-    href: '/ilanlar?kategori=giyim',
-    icon: Shirt,
-    color: 'bg-rose-400',
-    columns: [
-      { title: 'Kadın', items: ['Elbise', 'Ayakkabı', 'Çanta', 'Takı'] },
-      { title: 'Erkek', items: ['Ceket', 'Pantolon', 'Ayakkabı', 'Saat'] },
-      { title: 'Aksesuar', items: ['Gözlük', 'Kemer', 'Cüzdan', 'Şapka'] },
-    ],
-  },
-  {
-    label: 'Kişisel Bakım & Kozmetik',
-    href: searchHref('kozmetik'),
-    icon: Sparkles,
-    color: 'bg-purple-500',
-    columns: [
-      { title: 'Kozmetik', items: ['Parfüm', 'Makyaj', 'Cilt Bakımı', 'Saç Bakımı'] },
-      { title: 'Kişisel Bakım', items: ['Tıraş Makinesi', 'Saç Kurutma', 'Epilasyon'] },
-    ],
-  },
-  {
-    label: 'Anne & Bebek & Oyuncak',
-    href: searchHref('bebek oyuncak'),
-    icon: Baby,
-    color: 'bg-sky-400',
-    columns: [
-      { title: 'Bebek', items: ['Bebek Arabası', 'Mama Sandalyesi', 'Beşik', 'Oto Koltuğu'] },
-      { title: 'Oyuncak', items: ['Eğitici Oyuncak', 'Lego', 'Puzzle', 'Figür'] },
-      { title: 'Çocuk Giyim', items: ['Ayakkabı', 'Mont', 'Takım', 'Çanta'] },
-    ],
-  },
-  {
-    label: 'Hobi & Kitap & Müzik',
-    href: searchHref('hobi kitap müzik'),
-    icon: BookOpen,
-    color: 'bg-pink-400',
-    columns: [
-      { title: 'Kitap', items: ['Roman', 'Ders Kitabı', 'Çocuk Kitabı', 'Çizgi Roman'] },
-      { title: 'Müzik', items: ['Gitar', 'Piyano', 'Plak', 'Ses Kartı'] },
-      { title: 'Hobi', items: ['Koleksiyon', 'Model', 'El İşi'] },
-    ],
-  },
-  {
-    label: 'Ofis & Kırtasiye',
-    href: searchHref('ofis kırtasiye'),
-    icon: BriefcaseBusiness,
-    color: 'bg-yellow-500',
-    columns: [
-      { title: 'Ofis', items: ['Ofis Masası', 'Ofis Koltuğu', 'Dosya Dolabı'] },
-      { title: 'Kırtasiye', items: ['Kalem', 'Defter', 'Yazıcı Sarf', 'Çanta'] },
-    ],
-  },
-  {
-    label: 'Spor & Outdoor',
-    href: searchHref('spor outdoor'),
-    icon: Trophy,
-    color: 'bg-lime-500',
-    columns: [
-      { title: 'Spor', items: ['Bisiklet', 'Fitness', 'Futbol', 'Basketbol'] },
-      { title: 'Outdoor', items: ['Kamp', 'Çadır', 'Matara', 'Balıkçılık'] },
-    ],
-  },
-  {
-    label: 'Diğer Araçlar',
-    href: '/ilanlar?search=araç',
-    icon: Truck,
-    color: 'bg-sky-600',
-    columns: [
-      { title: 'Araçlar', items: ['Karavan', 'Tekne', 'Tarım Aracı', 'Römork'] },
-      { title: 'Parça', items: ['Lastik', 'Jant', 'Far', 'Akü'] },
-    ],
-  },
-  {
-    label: 'Antika',
-    href: searchHref('antika'),
-    icon: Gem,
-    color: 'bg-amber-600',
-    columns: [
-      { title: 'Antika', items: ['Mobilya', 'Tablo', 'Saat', 'Para', 'Obje'] },
-      { title: 'Koleksiyon', items: ['Pul', 'Plak', 'Kartpostal', 'Figür'] },
-    ],
-  },
-  {
-    label: 'Pet Shop',
-    href: searchHref('pet shop'),
-    icon: PawPrint,
-    color: 'bg-emerald-500',
-    columns: [
-      { title: 'Ürünler', items: ['Mama', 'Taşıma Çantası', 'Tasma', 'Akvaryum'] },
-      { title: 'Bakım', items: ['Kedi Ürünleri', 'Köpek Ürünleri', 'Kuş Ürünleri'] },
-    ],
-  },
-]
 
 const USER_PANEL_LINKS = [
   { href: '/profil', icon: ShoppingBag, label: 'Aldıklarım & Sattıklarım' },
@@ -252,10 +86,15 @@ const CATEGORY_META: Record<string, { icon: any; color: string }> = {
 }
 
 const groupFromCategory = (category?: NavCategory) => {
-  if (!category?.slug) return 'vehicle'
+  if (!category?.slug) return ''
   if (category.slug === 'arac') return 'vehicle'
   if (category.slug === 'motor') return 'motor'
   return category.slug
+}
+
+const initialFromName = (name?: string | null) => {
+  const t = (name || '').trim()
+  return (t[0] || '?').toUpperCase()
 }
 
 const categoryHref = (category: NavCategory) => `/ilanlar?kategori=${encodeURIComponent(category.slug)}`
@@ -264,8 +103,6 @@ const categorySearchHref = (category: NavCategory, term: string) =>
 
 const fallbackColumnsForCategory = (category?: NavCategory): CategoryColumn[] => {
   if (!category) return []
-  const fallback = MEGA_CATEGORIES.find((item) => item.label === category.name || item.href.includes(category.slug))
-  if (fallback?.columns?.length) return fallback.columns
   return (category.sub_categories || []).map((item) => ({ title: item.name, href: categorySearchHref(category, item.name) }))
 }
 
@@ -281,7 +118,7 @@ const columnsFromHierarchy = (category: NavCategory | undefined, nodes: Hierarch
 export default function Navbar() {
   const { user, logout, selectedCity, selectedDistrict, setSelectedLocation } = useAuthStore()
   const router = useRouter()
-  const [categories, setCategories] = useState<NavCategory[]>(defaultCategories)
+  const [categories, setCategories] = useState<NavCategory[]>([])
   const [hierarchyByGroup, setHierarchyByGroup] = useState<Record<string, HierarchyNode[]>>({})
   const [hierarchyLoading, setHierarchyLoading] = useState(false)
   const [search, setSearch] = useState('')
@@ -290,9 +127,9 @@ export default function Navbar() {
   const [locationCityDraft, setLocationCityDraft] = useState(selectedCity)
   const [locationDistrictDraft, setLocationDistrictDraft] = useState(selectedDistrict)
   const [categoryOpen, setCategoryOpen] = useState(false)
-  const [activeCategory, setActiveCategory] = useState(1)
+  const [activeCategory, setActiveCategory] = useState(0)
 
-  const menuCategories = categories.length ? categories : defaultCategories
+  const menuCategories = categories
   const activeMenuCategory = menuCategories[activeCategory] || menuCategories[0]
   const activeGroup = groupFromCategory(activeMenuCategory)
   const activeHierarchy = hierarchyByGroup[activeGroup] || []
@@ -311,8 +148,8 @@ export default function Navbar() {
   useEffect(() => {
     categoriesApi
       .getAll()
-      .then(({ data }) => setCategories(data.data?.length ? data.data : defaultCategories))
-      .catch(() => setCategories(defaultCategories))
+      .then(({ data }) => setCategories(data.data || []))
+      .catch(() => setCategories([]))
   }, [])
 
   useEffect(() => {
@@ -463,7 +300,7 @@ export default function Navbar() {
                 className="flex items-center gap-2 border border-gray-200 rounded-full px-2 h-10 hover:border-brand transition-colors bg-white"
               >
                 <div className="w-7 h-7 rounded-full bg-brand-light text-brand font-bold text-xs flex items-center justify-center">
-                  {user.name[0].toUpperCase()}
+                  {initialFromName(user.name)}
                 </div>
                 <span className="hidden md:block text-sm font-semibold max-w-[100px] truncate">{user.name}</span>
                 <ChevronDown className={`w-4 h-4 text-brand transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
@@ -482,7 +319,7 @@ export default function Navbar() {
                   <div className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-brand-light text-brand font-black flex items-center justify-center">
-                        {user.name[0].toUpperCase()}
+                        {initialFromName(user.name)}
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-black text-gray-900">{user.name}</p>
@@ -535,6 +372,7 @@ export default function Navbar() {
           </Link>
         </div>
 
+        {!!menuCategories.length && (
         <div className="relative">
           <nav className="flex gap-2 h-11 items-center overflow-x-auto scrollbar-hide md:hidden">
             <button
@@ -704,6 +542,7 @@ export default function Navbar() {
             </div>
           )}
         </div>
+        )}
       </div>
     </header>
   )

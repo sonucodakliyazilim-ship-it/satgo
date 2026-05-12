@@ -8,6 +8,9 @@ const passwordRules = body('password')
   .isLength({ min: 6 })
   .withMessage('Şifre en az 6 karakter olmalıdır.');
 
+router.get('/oauth/:provider/start', ctrl.startOAuth);
+router.get('/oauth/:provider/callback', ctrl.handleOAuthCallback);
+
 router.post(
   '/register',
   [

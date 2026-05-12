@@ -6,6 +6,24 @@ const uploadCsv = multer({
   limits: { fileSize: 2 * 1024 * 1024 },
 });
 
+const ensureGroupSettingsTable = async () => {
+  await query(`
+    CREATE TABLE IF NOT EXISTS hierarchy_group_settings (
+      group_key VARCHAR(80) PRIMARY KEY,
+      group_label VARCHAR(160),
+      group_hint VARCHAR(255),
+      level_labels TEXT[] NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await query(`
+    ALTER TABLE hierarchy_group_settings
+      ADD COLUMN IF NOT EXISTS group_label VARCHAR(160),
+      ADD COLUMN IF NOT EXISTS group_hint VARCHAR(255)
+  `);
+};
+
 const DEFAULT_PATHS = {
   vehicle: [
     ['BMW', 'X3', 'xDrive', 'M Sport'],
@@ -312,6 +330,59 @@ const ensureTable = async () => {
       CONSTRAINT hierarchy_options_unique_path UNIQUE (group_key, parent_key, slug)
     )
   `);
+};
+
+const getGroupSettings = async (req, res, next) => {
+  try {
+    await ensureGroupSettingsTable();
+    const requestedGroup = req.query.group || req.query.group_key;
+    if (!requestedGroup) {
+      const { rows } = await query(
+        `SELECT group_key, group_label, group_hint, level_labels
+         FROM hierarchy_group_settings
+         ORDER BY group_key ASC`,
+      );
+      return res.json({ success: true, data: rows });
+    }
+
+    const groupKey = normalizeGroup(requestedGroup);
+    const { rows } = await query(
+      'SELECT group_key, group_label, group_hint, level_labels FROM hierarchy_group_settings WHERE group_key = $1',
+      [groupKey],
+    );
+    res.json({
+      success: true,
+      data: rows[0] || { group_key: groupKey, group_label: null, group_hint: null, level_labels: [] },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const updateGroupSettings = async (req, res, next) => {
+  try {
+    await ensureGroupSettingsTable();
+    const groupKey = normalizeGroup(req.body.group_key || req.body.group);
+    const labels = Array.isArray(req.body.level_labels) ? req.body.level_labels.map((x) => String(x || '').trim()).filter(Boolean) : [];
+    const groupLabel = req.body.group_label === undefined ? null : String(req.body.group_label || '').trim() || null;
+    const groupHint = req.body.group_hint === undefined ? null : String(req.body.group_hint || '').trim() || null;
+    if (!groupKey) return res.status(422).json({ success: false, message: 'group_key gerekli.' });
+
+    const { rows } = await query(
+      `INSERT INTO hierarchy_group_settings (group_key, group_label, group_hint, level_labels)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (group_key) DO UPDATE SET
+         group_label = COALESCE(EXCLUDED.group_label, hierarchy_group_settings.group_label),
+         group_hint = COALESCE(EXCLUDED.group_hint, hierarchy_group_settings.group_hint),
+         level_labels = EXCLUDED.level_labels,
+         updated_at = NOW()
+       RETURNING group_key, group_label, group_hint, level_labels`,
+      [groupKey, groupLabel, groupHint, labels],
+    );
+    res.json({ success: true, message: 'Seviye etiketleri güncellendi.', data: rows[0] });
+  } catch (err) {
+    next(err);
+  }
 };
 
 const upsertNode = async ({ groupKey, parentId = null, label, level = 0, sortOrder = 0 }) => {
@@ -666,6 +737,8 @@ const importCsv = async (req, res, next) => {
 module.exports = {
   uploadCsv,
   getHierarchy,
+  getGroupSettings,
+  updateGroupSettings,
   createNode,
   updateNode,
   deleteNode,

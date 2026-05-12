@@ -1,24 +1,63 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/store'
+import { API_URL } from '@/lib/config'
 
 export default function GirisPage() {
+  return (
+    <Suspense fallback={<div className="min-h-[80vh] px-4 py-8" />}>
+      <GirisContent />
+    </Suspense>
+  )
+}
+
+function GirisContent() {
   const [tab, setTab] = useState<'login' | 'register'>('login')
-  const { login, register, loading } = useAuthStore()
+  const { login, register, loading, fetchMe } = useAuthStore()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [form, setForm] = useState({ name: '', email: '', password: '', phone: '' })
+
+  const rawNextPath = searchParams.get('next') || '/'
+  const nextPath = rawNextPath.startsWith('/') && !rawNextPath.startsWith('//') ? rawNextPath : '/'
+  const oauthRedirect = `/giris?oauth=success&next=${encodeURIComponent(nextPath)}`
+  const googleOAuthUrl = `${API_URL}/auth/oauth/google/start?redirect=${encodeURIComponent(oauthRedirect)}`
 
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((current) => ({ ...current, [key]: e.target.value }))
 
-  const getErrorMessage = (err: any, fallback: string) =>
-    err?.response?.data?.errors?.map((e: any) => e.message).join('\n') ||
-    err?.response?.data?.message ||
-    fallback
+  const getErrorMessage = (err: any, fallback: string) => {
+    const fromValidation = err?.response?.data?.errors?.map((e: any) => e.message).filter(Boolean).join('\n')
+    const fromBody = err?.response?.data?.message
+    if (fromValidation) return fromValidation
+    if (fromBody) return fromBody
+    const code = err?.code
+    if (code === 'ECONNABORTED' || err?.message?.includes?.('timeout'))
+      return 'Sunucuya bağlanırken zaman aşımı oluştu. İnternet bağlantınızı kontrol edin.'
+    if (err?.message === 'Network Error')
+      return 'Ağ hatası: API adresine erişilemiyor. Tarayıcı konsolunda engellenen istek var mı kontrol edin.'
+    return fallback
+  }
+
+  useEffect(() => {
+    const oauth = searchParams.get('oauth')
+    if (!oauth) return
+
+    if (oauth === 'success') {
+      fetchMe().finally(() => {
+        toast.success('Giriş başarılı')
+        router.replace(nextPath)
+      })
+      return
+    }
+
+    toast.error(searchParams.get('message') || 'Sosyal giriş tamamlanamadı')
+    router.replace('/giris')
+  }, [fetchMe, nextPath, router, searchParams])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -80,6 +119,22 @@ export default function GirisPage() {
           </div>
 
           <div className="p-6">
+            <div className="grid gap-3">
+              <a
+                href={googleOAuthUrl}
+                className="flex h-11 items-center justify-center gap-3 rounded-lg border border-gray-200 bg-white text-sm font-black text-gray-800 hover:border-brand/60 hover:bg-gray-50"
+              >
+                <span className="grid h-6 w-6 place-items-center rounded-full bg-white text-base font-black text-[#4285F4] shadow-sm">G</span>
+                Google ile giriş
+              </a>
+            </div>
+
+            <div className="my-5 flex items-center gap-3 text-xs font-bold uppercase text-gray-400">
+              <span className="h-px flex-1 bg-gray-100" />
+              veya
+              <span className="h-px flex-1 bg-gray-100" />
+            </div>
+
             {tab === 'login' ? (
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>

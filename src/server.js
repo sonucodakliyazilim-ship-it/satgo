@@ -30,9 +30,12 @@ const adminRoutes = require('./routes/admin.routes');
 const uploadRoutes = require('./routes/upload.routes');
 const bannerRoutes = require('./routes/banner.routes');
 const hierarchyRoutes = require('./routes/hierarchy.routes');
+const customFieldRoutes = require('./routes/customField.routes');
 
 const app = express();
 const server = http.createServer(app);
+
+app.set('trust proxy', 1);
 
 app.use(cors({
   origin: true,
@@ -94,6 +97,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/listings', listingRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/hierarchy', hierarchyRoutes);
+app.use('/api/custom-fields', customFieldRoutes);
 app.use('/api/favorites', favoriteRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/promotions', promotionRoutes);

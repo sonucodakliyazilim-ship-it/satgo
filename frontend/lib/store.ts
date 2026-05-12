@@ -17,6 +17,8 @@ interface AuthStore {
   authReady: boolean
   selectedCity: string
   selectedDistrict: string
+  /** Call once on client after mount — avoids SSR/localStorage hydration mismatch */
+  hydrateFromClientStorage: () => void
   setUser: (user: User | null) => void
   setSelectedLocation: (city: string, district?: string) => void
   setSelectedCity: (city: string) => void
@@ -24,17 +26,6 @@ interface AuthStore {
   register: (data: any) => Promise<void>
   logout: () => Promise<void>
   fetchMe: () => Promise<void>
-}
-
-const getStoredUser = () => {
-  if (typeof window === 'undefined' || !hasAuthTokens()) return null
-
-  try {
-    return JSON.parse(localStorage.getItem('authUser') || 'null') as User | null
-  } catch {
-    localStorage.removeItem('authUser')
-    return null
-  }
 }
 
 const persistUser = (user: User | null) => {
@@ -60,11 +51,32 @@ const getAuthTokens = (data: any) => {
 }
 
 export const useAuthStore = create<AuthStore>((set) => ({
-  user: getStoredUser(),
+  user: null,
   loading: false,
   authReady: false,
-  selectedCity: typeof window !== 'undefined' ? localStorage.getItem('selectedCity') || '' : '',
-  selectedDistrict: typeof window !== 'undefined' ? localStorage.getItem('selectedDistrict') || '' : '',
+  selectedCity: '',
+  selectedDistrict: '',
+
+  hydrateFromClientStorage: () => {
+    if (typeof window === 'undefined') return
+
+    set({
+      selectedCity: localStorage.getItem('selectedCity') || '',
+      selectedDistrict: localStorage.getItem('selectedDistrict') || '',
+    })
+
+    try {
+      if (!hasAuthTokens()) return
+      const raw = localStorage.getItem('authUser')
+      if (!raw) return
+      const parsed = JSON.parse(raw) as User | null
+      if (parsed && typeof parsed === 'object' && parsed.id) {
+        set({ user: parsed })
+      }
+    } catch {
+      localStorage.removeItem('authUser')
+    }
+  },
 
   setUser: (user) => {
     persistUser(user)
@@ -98,9 +110,19 @@ export const useAuthStore = create<AuthStore>((set) => ({
         persistUser(user)
         set({ user, loading: false, authReady: true })
       } else {
-        const me = await usersApi.getMe()
-        persistUser(me.data.data)
-        set({ user: me.data.data, loading: false, authReady: true })
+        try {
+          const me = await usersApi.getMe()
+          const nextUser = me?.data?.data ?? null
+          persistUser(nextUser)
+          set({ user: nextUser, loading: false, authReady: true })
+        } catch (inner: any) {
+          clearAuthCookies()
+          persistUser(null)
+          const msg =
+            inner?.response?.data?.message ||
+            'Giriş yanıtı alındı ancak profil doğrulanamadı. Tekrar deneyin.'
+          throw Object.assign(new Error(msg), { response: inner?.response })
+        }
       }
     } finally {
       set({ loading: false })
@@ -117,7 +139,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
       const { data } = await authApi.register(payload)
       const { user, accessToken, refreshToken } = getAuthTokens(data)
       if (accessToken) setAuthCookies(accessToken, refreshToken)
-      const currentUser = user || (await usersApi.getMe()).data.data
+      const meRes = user ? null : await usersApi.getMe().catch(() => null)
+      const currentUser = user || meRes?.data?.data || null
       persistUser(currentUser)
       set({ user: currentUser, loading: false, authReady: true })
     } finally {
@@ -138,8 +161,10 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
     try {
       const { data } = await usersApi.getMe()
-      persistUser(data.data)
-      set({ user: data.data })
+      const nextUser = data?.data ?? null
+      if (nextUser) persistUser(nextUser)
+      else persistUser(null)
+      set({ user: nextUser })
     } catch (error: any) {
       if (shouldClearSession(error)) {
         clearAuthCookies()

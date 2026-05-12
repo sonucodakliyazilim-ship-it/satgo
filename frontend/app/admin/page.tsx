@@ -8,6 +8,7 @@ import { adminApi, categoriesApi } from '@/lib/api'
 import { mediaUrl } from '@/lib/media'
 import { useAuthStore } from '@/lib/store'
 import HierarchyManager from '@/components/admin/HierarchyManager'
+import CustomFieldsManager from '@/components/admin/CustomFieldsManager'
 
 const LISTING_STATUSES = [
   ['pending', 'Beklemede'],
@@ -29,6 +30,7 @@ const ADMIN_TABS = [
   { key: 'users', label: 'Kullanıcılar', icon: Users },
   { key: 'categories', label: 'Kategoriler', icon: Tags },
   { key: 'hierarchy', label: 'Hiyerarşi', icon: Database },
+  { key: 'fields', label: 'Alanlar', icon: ListChecks },
   { key: 'banners', label: 'Bannerlar', icon: Images },
   { key: 'payments', label: 'Ödeme', icon: CreditCard },
 ]
@@ -711,6 +713,7 @@ export default function AdminPage() {
       )}
 
       {activeTab === 'hierarchy' && <HierarchyManager />}
+      {activeTab === 'fields' && <CustomFieldsManager />}
 
       {activeTab === 'payments' && (
       <section className="card overflow-hidden border-2 border-brand/20">

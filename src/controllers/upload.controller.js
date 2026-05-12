@@ -26,13 +26,22 @@ const extensionByMime = {
 const saveListingImage = async (listingId, file) => {
   const uploadRoot = getUploadRoot();
   const directory = path.join(uploadRoot, 'listings', String(listingId));
-  await fs.promises.mkdir(directory, { recursive: true });
 
   const ext = extensionByMime[file.mimetype] || path.extname(file.originalname).toLowerCase() || '.jpg';
   const filename = `${Date.now()}-${crypto.randomUUID()}${ext}`;
   const filePath = path.join(directory, filename);
 
-  await fs.promises.writeFile(filePath, file.buffer);
+  try {
+    await fs.promises.mkdir(directory, { recursive: true });
+    await fs.promises.writeFile(filePath, file.buffer);
+  } catch (err) {
+    if (['EACCES', 'ENOENT', 'ENOSPC', 'EROFS'].includes(err.code)) {
+      err.status = 500;
+      err.message = 'Sunucuda fotoğraf yükleme dizinine yazılamıyor. UPLOAD_DIR ve disk izinlerini kontrol edin.';
+    }
+    throw err;
+  }
+
   return `/uploads/listings/${listingId}/${filename}`;
 };
 

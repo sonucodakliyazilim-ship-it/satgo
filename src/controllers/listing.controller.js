@@ -1,5 +1,6 @@
 const { query, withTransaction } = require('../config/database');
 const { refreshExpiredPromotions } = require('../services/promotion.service');
+const { ensureTables: ensureCustomFieldTables, upsertListingCustomFields } = require('./customField.controller');
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -244,11 +245,13 @@ const createListing = async (req, res, next) => {
       condition, city, district, neighborhood, latitude, longitude,
       hierarchy_group, hierarchy_path, hierarchy_labels,
       vehicle_details, motorcycle_details, real_estate_details,
+      custom_fields,
     } = req.body;
 
     const cleanHierarchyPath = cleanStringArray(hierarchy_path);
     const cleanHierarchyLabels = cleanStringArray(hierarchy_labels);
     const cleanHierarchyGroup = hierarchy_group ? String(hierarchy_group).trim() : null;
+    await ensureCustomFieldTables();
 
     const result = await withTransaction(async (client) => {
       // Create listing
@@ -320,6 +323,9 @@ const createListing = async (req, res, next) => {
         );
       }
 
+      // Custom fields (category-dependent)
+      await upsertListingCustomFields(client, listing.id, custom_fields);
+
       // Update user listing count
       await client.query(
         'UPDATE users SET listing_count = listing_count + 1 WHERE id = $1',
@@ -348,6 +354,7 @@ const updateListing = async (req, res, next) => {
       city, district, neighborhood,
       hierarchy_group, hierarchy_path, hierarchy_labels,
       vehicle_details, motorcycle_details, real_estate_details,
+      custom_fields,
     } = req.body;
 
     const hasHierarchyPath = Object.prototype.hasOwnProperty.call(req.body, 'hierarchy_path');
@@ -355,6 +362,7 @@ const updateListing = async (req, res, next) => {
     const cleanHierarchyPath = cleanStringArray(hierarchy_path);
     const cleanHierarchyLabels = cleanStringArray(hierarchy_labels);
     const cleanHierarchyGroup = hierarchy_group === undefined ? undefined : String(hierarchy_group || '').trim() || null;
+    await ensureCustomFieldTables();
 
     await withTransaction(async (client) => {
       await client.query(
@@ -436,6 +444,10 @@ const updateListing = async (req, res, next) => {
           [id, r.listing_type, r.size_m2, r.room_count, r.building_age,
            r.floor, r.heating, r.is_furnished || false, r.monthly_dues || null]
         );
+      }
+
+      if (Array.isArray(custom_fields)) {
+        await upsertListingCustomFields(client, id, custom_fields);
       }
     });
 
