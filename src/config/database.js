@@ -51,12 +51,41 @@ pool.on('error', (err) => {
   process.exit(-1);
 });
 
-const query = (text, params) => pool.query(text, params);
+const compactSql = (text) =>
+  typeof text === 'string'
+    ? text.replace(/\s+/g, ' ').trim().slice(0, 700)
+    : String(text || '').slice(0, 700);
+
+const logQueryError = (err, text, params) => {
+  if (err?.code === '42601' || /syntax error/i.test(err?.message || '')) {
+    console.error('[db syntax error]', err.message);
+    console.error('[db syntax sql]', compactSql(text));
+    if (Array.isArray(params)) console.error('[db syntax params]', params.map((item) => (item == null ? item : String(item).slice(0, 80))));
+  }
+};
+
+const query = async (text, params) => {
+  try {
+    return await pool.query(text, params);
+  } catch (err) {
+    logQueryError(err, text, params);
+    throw err;
+  }
+};
 
 const getClient = () => pool.connect();
 
 const withTransaction = async (callback) => {
   const client = await pool.connect();
+  const originalQuery = client.query.bind(client);
+  client.query = async (text, params) => {
+    try {
+      return await originalQuery(text, params);
+    } catch (err) {
+      logQueryError(err, text, params);
+      throw err;
+    }
+  };
   try {
     await client.query('BEGIN');
     const result = await callback(client);

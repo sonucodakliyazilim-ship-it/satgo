@@ -52,10 +52,16 @@ async function migrate() {
         }
         console.log(`Applying ${file}...`);
         const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
-        await client.query('BEGIN');
-        await client.query(sql);
-        await client.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
-        await client.query('COMMIT');
+        try {
+          await client.query('BEGIN');
+          await client.query(sql);
+          await client.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
+          await client.query('COMMIT');
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => {});
+          console.error(`Migration failed while applying ${file}.`);
+          throw err;
+        }
       }
     }
 

@@ -3,7 +3,7 @@ const { query } = require('../config/database');
 
 const uploadCsv = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 2 * 1024 * 1024 },
+  limits: { fileSize: 20 * 1024 * 1024 },
 });
 
 const ensureGroupSettingsTable = async () => {
@@ -319,16 +319,31 @@ const ensureTable = async () => {
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
       group_key VARCHAR(80) NOT NULL,
       parent_id UUID REFERENCES hierarchy_options(id) ON DELETE CASCADE,
-      parent_key UUID GENERATED ALWAYS AS (COALESCE(parent_id, '00000000-0000-0000-0000-000000000000'::uuid)) STORED,
       label VARCHAR(160) NOT NULL,
       slug VARCHAR(180) NOT NULL,
       level INTEGER NOT NULL DEFAULT 0,
       sort_order INTEGER NOT NULL DEFAULT 0,
       is_active BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      CONSTRAINT hierarchy_options_unique_path UNIQUE (group_key, parent_key, slug)
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+
+  await query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS hierarchy_options_unique_root_path
+    ON hierarchy_options (group_key, slug)
+    WHERE parent_id IS NULL AND is_active = TRUE
+  `);
+
+  await query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS hierarchy_options_unique_child_path
+    ON hierarchy_options (group_key, parent_id, slug)
+    WHERE parent_id IS NOT NULL AND is_active = TRUE
+  `);
+
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_hierarchy_options_group_parent
+    ON hierarchy_options (group_key, parent_id, sort_order)
   `);
 };
 
@@ -368,15 +383,19 @@ const updateGroupSettings = async (req, res, next) => {
     const groupHint = req.body.group_hint === undefined ? null : String(req.body.group_hint || '').trim() || null;
     if (!groupKey) return res.status(422).json({ success: false, message: 'group_key gerekli.' });
 
+    const existing = await query('SELECT group_key FROM hierarchy_group_settings WHERE group_key = $1', [groupKey]);
     const { rows } = await query(
-      `INSERT INTO hierarchy_group_settings (group_key, group_label, group_hint, level_labels)
-       VALUES ($1,$2,$3,$4)
-       ON CONFLICT (group_key) DO UPDATE SET
-         group_label = COALESCE(EXCLUDED.group_label, hierarchy_group_settings.group_label),
-         group_hint = COALESCE(EXCLUDED.group_hint, hierarchy_group_settings.group_hint),
-         level_labels = EXCLUDED.level_labels,
-         updated_at = NOW()
-       RETURNING group_key, group_label, group_hint, level_labels`,
+      existing.rows.length
+        ? `UPDATE hierarchy_group_settings SET
+             group_label = COALESCE($2, group_label),
+             group_hint = COALESCE($3, group_hint),
+             level_labels = $4,
+             updated_at = NOW()
+           WHERE group_key = $1
+           RETURNING group_key, group_label, group_hint, level_labels`
+        : `INSERT INTO hierarchy_group_settings (group_key, group_label, group_hint, level_labels)
+           VALUES ($1,$2,$3,$4)
+           RETURNING group_key, group_label, group_hint, level_labels`,
       [groupKey, groupLabel, groupHint, labels],
     );
     res.json({ success: true, message: 'Seviye etiketleri güncellendi.', data: rows[0] });
@@ -390,17 +409,42 @@ const upsertNode = async ({ groupKey, parentId = null, label, level = 0, sortOrd
   if (!cleanLabel) return null;
 
   const slug = makeSlug(cleanLabel);
+  const existing = parentId
+    ? await query(
+        `SELECT id
+         FROM hierarchy_options
+         WHERE group_key = $1
+           AND parent_id = $2
+           AND slug = $3
+         LIMIT 1`,
+        [groupKey, parentId, slug],
+      )
+    : await query(
+        `SELECT id
+         FROM hierarchy_options
+         WHERE group_key = $1
+           AND parent_id IS NULL
+           AND slug = $2
+         LIMIT 1`,
+        [groupKey, slug],
+      );
+
   const { rows } = await query(
-    `INSERT INTO hierarchy_options (group_key, parent_id, label, slug, level, sort_order, is_active)
-     VALUES ($1,$2,$3,$4,$5,$6,TRUE)
-     ON CONFLICT ON CONSTRAINT hierarchy_options_unique_path DO UPDATE SET
-       label = EXCLUDED.label,
-       level = EXCLUDED.level,
-       sort_order = EXCLUDED.sort_order,
-       is_active = TRUE,
-       updated_at = NOW()
-     RETURNING *`,
-    [groupKey, parentId, cleanLabel, slug, level, sortOrder],
+    existing.rows.length
+      ? `UPDATE hierarchy_options SET
+           label = $1,
+           level = $2,
+           sort_order = $3,
+           is_active = TRUE,
+           updated_at = NOW()
+         WHERE id = $4
+         RETURNING *`
+      : `INSERT INTO hierarchy_options (group_key, parent_id, label, slug, level, sort_order, is_active)
+         VALUES ($1,$2,$3,$4,$5,$6,TRUE)
+         RETURNING *`,
+    existing.rows.length
+      ? [cleanLabel, level, sortOrder, existing.rows[0].id]
+      : [groupKey, parentId, cleanLabel, slug, level, sortOrder],
   );
 
   return rows[0];
@@ -554,7 +598,11 @@ const getHierarchy = async (req, res, next) => {
   try {
     await ensureTable();
     const groupKey = normalizeGroup(req.query.group || req.query.group_key || 'vehicle');
-    await ensureDefaults(groupKey);
+    try {
+      await ensureDefaults(groupKey);
+    } catch (seedErr) {
+      console.error('[hierarchy] ensureDefaults failed for', groupKey, seedErr?.message || seedErr);
+    }
 
     const { rows } = await query(
       `SELECT *
