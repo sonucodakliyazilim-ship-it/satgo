@@ -22,6 +22,11 @@ const extensionByMime = {
 };
 
 const saveListingImage = async (listingId, file) => {
+  if ((process.env.LISTING_IMAGE_STORAGE || 'database') !== 'filesystem') {
+    const mime = file.mimetype || 'image/jpeg';
+    return `data:${mime};base64,${file.buffer.toString('base64')}`;
+  }
+
   const uploadRoot = getUploadRoot();
   const directory = path.join(uploadRoot, 'listings', String(listingId));
 

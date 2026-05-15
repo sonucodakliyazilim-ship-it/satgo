@@ -62,9 +62,7 @@ export default function ListingCard({ listing }: { listing: any }) {
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center px-4 text-center text-xs font-bold text-gray-400">
-            Fotoğraf yüklenemedi
-          </div>
+          <img src="/satgo-logo.jpeg" alt="" className="h-full w-full object-contain p-10 opacity-70" />
         )}
 
         <div className="absolute top-2 left-2 flex gap-1 flex-wrap">

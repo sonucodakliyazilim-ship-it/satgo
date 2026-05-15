@@ -169,9 +169,7 @@ export default function ListingDetailPage() {
                   className="h-full w-full object-cover"
                 />
               ) : (
-                <div className="flex h-full w-full items-center justify-center px-6 text-center text-sm font-bold text-gray-400">
-                  Fotoğraf yüklenemedi
-                </div>
+                <img src="/satgo-logo.jpeg" alt="" className="h-full w-full object-contain p-16 opacity-70" />
               )}
 
               <div className="absolute top-3 left-3 flex gap-1">

@@ -404,7 +404,7 @@ function DealRow({ item }: { item: any }) {
 function ListingImage({ img, title }: { img: string | null; title: string }) {
   return (
     <div className="w-20 h-16 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center shrink-0">
-      {img ? <img src={img} alt={title} className="w-full h-full object-cover" /> : <span className="px-2 text-center text-[10px] font-bold text-gray-400">Fotoğraf yok</span>}
+      {img ? <img src={img} alt={title} className="w-full h-full object-cover" /> : <img src="/satgo-logo.jpeg" alt="" className="h-full w-full object-contain p-3 opacity-70" />}
     </div>
   )
 }

@@ -77,6 +77,11 @@ app.use('/api/auth', authRoutes);
 
 app.get('/api/users/me/profile', directAuth, userController.getMe);
 app.get('/api/listings/me', directAuth, listingController.getMyListings);
+app.post('/api/listings/with-images',
+  directAuth,
+  uploadController.upload.array('images', 10),
+  listingController.createListingWithImages,
+);
 app.post('/api/listings',
   directAuth,
   [
