@@ -1,4 +1,3 @@
-require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -9,6 +8,8 @@ const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const { body } = require('express-validator');
+
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { pool, query } = require('./config/database');
 const socketHandler = require('./utils/socketHandler');

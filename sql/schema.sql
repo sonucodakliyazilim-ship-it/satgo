@@ -1,5 +1,5 @@
 -- ============================================================
--- ilanGO - PostgreSQL Database Schema
+-- Satgo - PostgreSQL Database Schema
 -- ============================================================
 
 -- Enable extensions

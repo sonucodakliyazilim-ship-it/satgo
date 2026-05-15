@@ -169,7 +169,9 @@ export default function ListingDetailPage() {
                   className="h-full w-full object-cover"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-7xl">{listing.category_icon || '📦'}</div>
+                <div className="flex h-full w-full items-center justify-center px-6 text-center text-sm font-bold text-gray-400">
+                  Fotoğraf yüklenemedi
+                </div>
               )}
 
               <div className="absolute top-3 left-3 flex gap-1">
@@ -264,6 +266,28 @@ export default function ListingDetailPage() {
                     {label}
                   </span>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {!!listing.custom_fields?.length && (
+            <div className="card p-5">
+              <h2 className="font-bold text-gray-800 mb-3">İlan Bilgileri</h2>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {listing.custom_fields
+                  .filter((field: any) => field.value !== null && field.value !== undefined && field.value !== '')
+                  .map((field: any) => (
+                    <div key={field.id} className="rounded-lg bg-gray-50 px-3 py-2.5">
+                      <p className="text-[11px] font-medium text-gray-400">{field.label}</p>
+                      <p className="text-sm font-semibold text-gray-800">
+                        {field.field_type === 'checkbox' || field.field_type === 'boolean'
+                          ? field.value
+                            ? 'Evet'
+                            : 'Hayır'
+                          : String(field.value)}
+                      </p>
+                    </div>
+                  ))}
               </div>
             </div>
           )}

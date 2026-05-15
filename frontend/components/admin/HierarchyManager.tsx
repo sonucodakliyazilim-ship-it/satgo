@@ -65,6 +65,27 @@ const flatten = (nodes: Node[], depth = 0, parentLabel = ''): Array<Node & { dep
     ...flatten(node.children || [], depth + 1, node.label),
   ])
 
+const flattenCategories = (categories: any[] = [], parentName = ''): any[] =>
+  categories.flatMap((category) => [
+    { ...category, parentName },
+    ...flattenCategories(category.sub_categories || [], category.name),
+  ])
+
+const slugifyKey = (value: string) =>
+  value
+    .trim()
+    .toLocaleLowerCase('tr-TR')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
 export default function HierarchyManager() {
   const [group, setGroup] = useState('vehicle')
   const [groups, setGroups] = useState<GroupOption[]>(defaultGroups)
@@ -95,7 +116,10 @@ export default function HierarchyManager() {
       const { data } = await hierarchyApi.getTree(group)
       setNodes(data.data || [])
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Hiyerarşi alınamadı')
+      const detail =
+        err?.response?.data?.message ||
+        (typeof err?.message === 'string' && err.message !== 'Network Error' ? err.message : '')
+      toast.error(detail || 'Hiyerarşi alınamadı. API veya veritabanı bağlantısını kontrol edin.')
     } finally {
       setLoading(false)
     }
@@ -130,11 +154,11 @@ export default function HierarchyManager() {
 
   useEffect(() => {
     categoriesApi
-      .getAll()
+      .getAll({ include_inactive: true })
       .then(({ data }) => {
-        const categoryGroups = (data.data || []).map((category: any) => ({
+        const categoryGroups = flattenCategories(data.data || []).map((category: any) => ({
           value: groupFromCategory(category),
-          label: category.name,
+          label: category.parentName ? `${category.parentName} / ${category.name}` : category.name,
           hint: category.slug === 'arac' || category.slug === 'motor' ? 'Marka > Model > Seri > Paket' : 'Seviye 1 > Seviye 2 > Seviye 3',
         }))
         const merged = [...defaultGroups, ...categoryGroups].filter(
@@ -255,7 +279,7 @@ export default function HierarchyManager() {
 
   const createGroup = async (e: React.FormEvent) => {
     e.preventDefault()
-    const key = newGroupKey.trim()
+    const key = slugifyKey(newGroupKey || newGroupLabel)
     if (!key) {
       toast.error('Veri grubu anahtarı gerekli')
       return

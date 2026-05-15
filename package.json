@@ -1,7 +1,7 @@
 {
-  "name": "ilango-backend",
+  "name": "satgo-backend",
   "version": "1.0.0",
-  "description": "ilanGO - Classified Ads Platform API",
+  "description": "Satgo - Classified Ads Platform API",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/config/migrate.js && node src/server.js",

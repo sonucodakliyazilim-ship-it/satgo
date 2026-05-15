@@ -1,6 +1,7 @@
 const { query, withTransaction } = require('../config/database');
 const { refreshExpiredPromotions } = require('../services/promotion.service');
 const { ensureTables: ensureCustomFieldTables, upsertListingCustomFields } = require('./customField.controller');
+const { insertListingImages } = require('./upload.controller');
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -11,8 +12,25 @@ const cleanStringArray = (value) => {
   return value.map((item) => String(item || '').trim()).filter(Boolean);
 };
 
+const getCategoryScopeIds = async (categoryId) => {
+  const id = Number(categoryId);
+  if (!Number.isFinite(id)) return [];
+  const { rows } = await query(
+    `WITH RECURSIVE category_scope AS (
+       SELECT id FROM categories WHERE id = $1
+       UNION ALL
+       SELECT c.id
+       FROM categories c
+       JOIN category_scope parent ON parent.id = c.parent_id
+     )
+     SELECT id FROM category_scope`,
+    [id],
+  );
+  return rows.map((row) => row.id);
+};
+
 const buildListingQuery = ({ category, city, district, minPrice, maxPrice, search,
-  sortBy, status, userId, featured, urgent, showcase, preferredCity, preferredDistrict, page = 1 }) => {
+  sortBy, status, userId, featured, urgent, showcase, preferredCity, preferredDistrict, page = 1, categoryIds }) => {
 
   const conditions = ["l.status = 'active'"];
   const params = [];
@@ -21,7 +39,14 @@ const buildListingQuery = ({ category, city, district, minPrice, maxPrice, searc
 
   if (userId)   { conditions.push(`l.user_id = $${p++}`);       params.push(userId); }
   if (status)   { conditions.push(`l.status = $${p++}::listing_status`); params.push(status); }
-  if (category) { conditions.push(`(l.category_id = $${p} OR l.sub_category_id = $${p++})`); params.push(category); }
+  if (Array.isArray(categoryIds) && categoryIds.length) {
+    conditions.push(`(l.category_id = ANY($${p}::int[]) OR l.sub_category_id = ANY($${p}::int[]))`);
+    params.push(categoryIds);
+    p += 1;
+  } else if (category) {
+    conditions.push(`(l.category_id = $${p} OR l.sub_category_id = $${p++})`);
+    params.push(category);
+  }
   if (city)     { conditions.push(`l.city ILIKE $${p++}`);      params.push(`%${city}%`); }
   if (district) { conditions.push(`l.district ILIKE $${p++}`);  params.push(`%${district}%`); }
   if (minPrice) { conditions.push(`l.price >= $${p++}`);        params.push(minPrice); }
@@ -70,7 +95,7 @@ const selectListingCards = async ({ where, order, params, orderParams = [], limi
     `SELECT l.*,
             c.name AS category_name, c.slug AS category_slug, c.icon AS category_icon,
             u.name AS seller_name, NULL AS seller_avatar, u.rating_avg AS seller_rating,
-            (SELECT url FROM listing_images WHERE listing_id = l.id AND is_primary = TRUE LIMIT 1) AS primary_image
+            (SELECT url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS primary_image
      FROM listings l
      JOIN categories c ON c.id = l.category_id
      JOIN users u ON u.id = l.user_id
@@ -121,7 +146,8 @@ const HOME_SECTION_CONFIGS = [
 const getListings = async (req, res, next) => {
   try {
     await refreshExpiredPromotions();
-    const { where, order, params, orderParams, offset } = buildListingQuery(req.query);
+    const categoryIds = req.query.category ? await getCategoryScopeIds(req.query.category) : [];
+    const { where, order, params, orderParams, offset } = buildListingQuery({ ...req.query, categoryIds });
 
     const countQ = await query(`SELECT COUNT(*) FROM listings l ${where}`, params);
     const total  = parseInt(countQ.rows[0].count);
@@ -217,6 +243,67 @@ const getListing = async (req, res, next) => {
       listing.real_estate_details = det.rows[0] || null;
     }
 
+    await ensureCustomFieldTables();
+    const customFieldRows = await query(
+      `SELECT f.id,
+              f.field_key,
+              f.label,
+              f.field_type,
+              f.sort_order,
+              lcf.value_text,
+              lcf.value_number,
+              lcf.value_bool,
+              o.label AS option_label
+       FROM listing_custom_fields lcf
+       JOIN custom_fields f ON f.id = lcf.field_id
+       LEFT JOIN custom_field_options o
+         ON o.field_id = f.id
+        AND o.value = lcf.value_text
+        AND o.is_active = TRUE
+       WHERE lcf.listing_id = $1
+         AND f.is_active = TRUE
+      ORDER BY f.sort_order, f.label`,
+      [id],
+    );
+
+    for (const field of customFieldRows.rows) {
+      if (field.field_type !== 'multi_select' || !field.value_text) continue;
+      let selectedValues = [];
+      try {
+        const parsed = JSON.parse(field.value_text);
+        selectedValues = Array.isArray(parsed) ? parsed.map(String) : [];
+      } catch {
+        selectedValues = String(field.value_text).split(',').map((item) => item.trim()).filter(Boolean);
+      }
+      if (!selectedValues.length) continue;
+
+      const optionLabels = await query(
+        `SELECT value, label
+         FROM custom_field_options
+         WHERE field_id = $1
+           AND value = ANY($2::text[])
+           AND is_active = TRUE`,
+        [field.id, selectedValues],
+      );
+      const byValue = new Map(optionLabels.rows.map((option) => [option.value, option.label]));
+      field.multi_option_label = selectedValues.map((value) => byValue.get(value) || value).join(', ');
+    }
+
+    listing.custom_fields = customFieldRows.rows.map((field) => ({
+      id: field.id,
+      field_key: field.field_key,
+      label: field.label,
+      field_type: field.field_type,
+      value:
+        field.field_type === 'number'
+          ? field.value_number
+          : field.field_type === 'checkbox' || field.field_type === 'boolean'
+            ? field.value_bool
+            : field.field_type === 'multi_select'
+              ? field.multi_option_label || field.value_text
+              : field.option_label || field.value_text,
+    }));
+
     // Increment view count only for visitors, not the listing owner.
     if (!req.user || req.user.id !== listing.user_id) {
       query('UPDATE listings SET view_count = view_count + 1 WHERE id = $1', [id]).catch(() => {});
@@ -251,7 +338,16 @@ const createListing = async (req, res, next) => {
     const cleanHierarchyPath = cleanStringArray(hierarchy_path);
     const cleanHierarchyLabels = cleanStringArray(hierarchy_labels);
     const cleanHierarchyGroup = hierarchy_group ? String(hierarchy_group).trim() : null;
-    await ensureCustomFieldTables();
+    const hasCustomFields = Array.isArray(custom_fields) && custom_fields.length > 0;
+    let canSaveCustomFields = hasCustomFields;
+    if (hasCustomFields) {
+      try {
+        await ensureCustomFieldTables();
+      } catch (schemaErr) {
+        canSaveCustomFields = false;
+        console.warn('[listings] custom fields skipped:', schemaErr.message);
+      }
+    }
 
     const result = await withTransaction(async (client) => {
       // Create listing
@@ -324,7 +420,9 @@ const createListing = async (req, res, next) => {
       }
 
       // Custom fields (category-dependent)
-      await upsertListingCustomFields(client, listing.id, custom_fields);
+      if (canSaveCustomFields) {
+        await upsertListingCustomFields(client, listing.id, custom_fields);
+      }
 
       // Update user listing count
       await client.query(
@@ -341,6 +439,73 @@ const createListing = async (req, res, next) => {
       data: result,
     });
   } catch (err) {
+    next(err);
+  }
+};
+
+const parseListingPayload = (body = {}) => {
+  if (body.payload) {
+    const parsed = typeof body.payload === 'string' ? JSON.parse(body.payload) : body.payload;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  }
+  return body;
+};
+
+const createListingWithImages = async (req, res, next) => {
+  const originalBody = req.body;
+  try {
+    const payload = parseListingPayload(req.body);
+    if (!req.files || req.files.length === 0) {
+      return res.status(422).json({ success: false, message: 'Ilan yayinlamak icin en az 1 fotograf yukleyin.' });
+    }
+
+    let responseCode = 201;
+    let responseBody = null;
+    req.body = payload;
+
+    await createListing(
+      req,
+      {
+        status(code) {
+          responseCode = code;
+          return this;
+        },
+        json(body) {
+          responseBody = body;
+          return this;
+        },
+      },
+      (err) => {
+        if (err) throw err;
+      },
+    );
+
+    req.body = originalBody;
+
+    const listing = responseBody?.data;
+    if (!responseBody?.success || !listing?.id) {
+      return res.status(responseCode).json(responseBody || { success: false, message: 'Ilan olusturulamadi.' });
+    }
+
+    try {
+      const images = await insertListingImages({ listingId: listing.id, files: req.files, user: req.user });
+      return res.status(201).json({
+        success: true,
+        message: 'Ilan fotograflarla yayina alindi.',
+        data: { ...listing, images, primary_image: images[0]?.url || null },
+      });
+    } catch (uploadErr) {
+      await withTransaction(async (client) => {
+        await client.query('DELETE FROM listings WHERE id = $1', [listing.id]);
+        await client.query(
+          'UPDATE users SET listing_count = GREATEST(listing_count - 1, 0) WHERE id = $1',
+          [req.user.id],
+        );
+      }).catch(() => {});
+      throw uploadErr;
+    }
+  } catch (err) {
+    req.body = originalBody;
     next(err);
   }
 };
@@ -492,7 +657,7 @@ const getMyListings = async (req, res, next) => {
 
     const { rows } = await query(
       `SELECT l.*, c.name AS category_name, c.icon AS category_icon,
-              (SELECT url FROM listing_images WHERE listing_id = l.id AND is_primary = TRUE LIMIT 1) AS primary_image
+              (SELECT url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS primary_image
        FROM listings l
        JOIN categories c ON c.id = l.category_id
        WHERE ${conds.join(' AND ')}
@@ -566,7 +731,7 @@ const getUserListings = async (req, res, next) => {
 
     const { rows } = await query(
       `SELECT l.*, c.name AS category_name, c.icon AS category_icon,
-              (SELECT url FROM listing_images WHERE listing_id = l.id AND is_primary = TRUE LIMIT 1) AS primary_image
+              (SELECT url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS primary_image
        FROM listings l JOIN categories c ON c.id = l.category_id
        WHERE l.user_id = $1 AND l.status = $2
        ORDER BY l.created_at DESC
@@ -585,6 +750,7 @@ module.exports = {
   getHomeSections,
   getListing,
   createListing,
+  createListingWithImages,
   updateListing,
   deleteListing,
   getMyListings,

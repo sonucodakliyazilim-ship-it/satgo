@@ -1,4 +1,4 @@
-# ilanGO Backend API
+# Satgo Backend API
 
 Full-featured classified ads platform backend built with **Node.js + Express + PostgreSQL + Socket.io**.
 
@@ -22,7 +22,7 @@ Full-featured classified ads platform backend built with **Node.js + Express + P
 ## Project Structure
 
 ```
-ilanGO-backend/
+satgo-backend/
 ├── sql/
 │   └── schema.sql              # Full PostgreSQL schema (run first)
 ├── src/
@@ -71,8 +71,8 @@ ilanGO-backend/
 ### 2 — Clone & Install
 
 ```bash
-git clone <repo-url> ilango-backend
-cd ilango-backend
+git clone <repo-url> satgo-backend
+cd satgo-backend
 npm install
 ```
 
@@ -86,7 +86,7 @@ cp .env.example .env
 ### 4 — Create Database
 
 ```bash
-psql -U postgres -c "CREATE DATABASE ilango_db;"
+psql -U postgres -c "CREATE DATABASE satgo_db;"
 ```
 
 ### 5 — Run Migration (creates all tables + seeds categories & packages)

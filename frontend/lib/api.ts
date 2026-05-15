@@ -145,6 +145,7 @@ export const listingsApi = {
   getMine: (params?: any) => api.get('/listings/me', { params }),
   getOne: (id: string) => api.get(`/listings/${id}`),
   create: (d: any) => api.post('/listings', d),
+  createWithImages: (d: FormData) => api.post('/listings/with-images', d, { timeout: 120000 }),
   update: (id: string, d: any) => api.patch(`/listings/${id}`, d),
   setStatus: (id: string, status: string) => api.patch(`/listings/${id}/status`, { status }),
   delete: (id: string) => api.delete(`/listings/${id}`),
@@ -179,7 +180,7 @@ export const bannersApi = {
 }
 
 export const categoriesApi = {
-  getAll: () => api.get('/categories'),
+  getAll: (params?: any) => api.get('/categories', { params }),
   getOne: (slug: string) => api.get(`/categories/${slug}`),
   create: (d: any) => api.post('/categories', d),
   update: (id: string | number, d: any) => api.patch(`/categories/${id}`, d),

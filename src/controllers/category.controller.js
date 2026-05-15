@@ -83,8 +83,14 @@ const makeSlug = (value) =>
 
 const uploadCsv = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 2 * 1024 * 1024 },
+  limits: { fileSize: 20 * 1024 * 1024 },
 });
+
+const preventCategoryCache = (res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+};
 
 const parseCsvLine = (line) => {
   const result = [];
@@ -205,7 +211,9 @@ const ensureDefaultCategories = async () => {
 // GET /api/categories
 const getCategories = async (req, res, next) => {
   try {
+    preventCategoryCache(res);
     await ensureDefaultCategories();
+    const includeInactive = req.query.include_inactive === 'true' || req.query.includeInactive === 'true';
 
     const { rows } = await query(
       `WITH listing_counts AS (
@@ -222,9 +230,10 @@ const getCategories = async (req, res, next) => {
        SELECT c.*, COALESCE(SUM(lc.count), 0)::int AS listing_count
        FROM categories c
        LEFT JOIN listing_counts lc ON lc.category_id = c.id
-       WHERE c.is_active = TRUE
+       WHERE ($1::boolean = TRUE OR c.is_active = TRUE)
        GROUP BY c.id
-       ORDER BY c.parent_id NULLS FIRST, c.sort_order, c.name`
+       ORDER BY c.parent_id NULLS FIRST, c.sort_order, c.name`,
+      [includeInactive],
     );
 
     const byId = new Map();
@@ -255,7 +264,7 @@ const getCategory = async (req, res, next) => {
 // POST /api/categories  (admin)
 const createCategory = async (req, res, next) => {
   try {
-    const { parent_id, name, slug, icon, description, sort_order } = req.body;
+    const { parent_id, name, slug, icon, description, sort_order, is_active } = req.body;
     const normalizedSlug = makeSlug(slug || name);
     if (!name || !normalizedSlug) {
       return res.status(422).json({ success: false, message: 'Kategori adi gerekli.' });
@@ -263,16 +272,16 @@ const createCategory = async (req, res, next) => {
 
     const { rows } = await query(
       `INSERT INTO categories (parent_id, name, slug, icon, description, sort_order, is_active)
-       VALUES ($1,$2,$3,$4,$5,$6,TRUE)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (slug) DO UPDATE SET
          parent_id = EXCLUDED.parent_id,
          name = EXCLUDED.name,
          icon = EXCLUDED.icon,
          description = EXCLUDED.description,
          sort_order = EXCLUDED.sort_order,
-         is_active = TRUE
+         is_active = EXCLUDED.is_active
        RETURNING *`,
-      [parent_id || null, name.trim(), normalizedSlug, icon || null, description || null, sort_order || 0]
+      [parent_id || null, name.trim(), normalizedSlug, icon || null, description || null, sort_order || 0, is_active !== false]
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (err) { next(err); }
@@ -284,6 +293,31 @@ const updateCategory = async (req, res, next) => {
     const { parent_id, name, slug, icon, description, sort_order, is_active } = req.body;
     const hasParent = Object.prototype.hasOwnProperty.call(req.body, 'parent_id');
     const normalizedSlug = slug || name ? makeSlug(slug || name) : null;
+
+    if (hasParent) {
+      const parentId = parent_id || null;
+      if (parentId && String(parentId) === String(req.params.id)) {
+        return res.status(422).json({ success: false, message: 'Kategori kendisinin altına taşınamaz.' });
+      }
+
+      if (parentId) {
+        const branch = await query(
+          `WITH RECURSIVE branch AS (
+             SELECT id FROM categories WHERE id = $1
+             UNION ALL
+             SELECT child.id
+             FROM categories child
+             JOIN branch parent ON child.parent_id = parent.id
+           )
+           SELECT 1 FROM branch WHERE id = $2 LIMIT 1`,
+          [req.params.id, parentId],
+        );
+        if (branch.rows.length) {
+          return res.status(422).json({ success: false, message: 'Kategori kendi alt kategorisinin içine taşınamaz.' });
+        }
+      }
+    }
+
     const { rows } = await query(
       `UPDATE categories SET
          parent_id   = CASE WHEN $1 THEN $2 ELSE parent_id END,
@@ -305,9 +339,16 @@ const updateCategory = async (req, res, next) => {
 const deleteCategory = async (req, res, next) => {
   try {
     const { rows } = await query(
-      `UPDATE categories
+      `WITH RECURSIVE branch AS (
+         SELECT id FROM categories WHERE id = $1
+         UNION ALL
+         SELECT child.id
+         FROM categories child
+         JOIN branch parent ON child.parent_id = parent.id
+       )
+       UPDATE categories
        SET is_active = FALSE
-       WHERE id = $1 OR parent_id = $1
+       WHERE id IN (SELECT id FROM branch)
        RETURNING *`,
       [req.params.id],
     );

@@ -59,6 +59,7 @@ const emptyCategoryForm = {
   slug: '',
   icon: '',
   sort_order: '0',
+  is_active: 'true',
 }
 
 const slugify = (value: string) =>
@@ -73,6 +74,12 @@ const slugify = (value: string) =>
     .replace(/ç/g, 'c')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
+
+const flattenCategories = (items: any[] = [], depth = 0, parentName = ''): any[] =>
+  items.flatMap((category) => [
+    { ...category, parent_name: parentName, depth },
+    ...flattenCategories(category.sub_categories || [], depth + 1, category.name),
+  ])
 
 export default function AdminPage() {
   const router = useRouter()
@@ -113,7 +120,7 @@ export default function AdminPage() {
         adminApi.promotionOrders(orderStatus ? { status: orderStatus } : undefined),
         adminApi.banners(),
         adminApi.paymentSettings(),
-        categoriesApi.getAll(),
+        categoriesApi.getAll({ include_inactive: true }),
       ])
       setDashboard(d.data.data)
       setUsers(u.data.data)
@@ -301,6 +308,7 @@ export default function AdminPage() {
       slug: category.slug || '',
       icon: category.icon || '',
       sort_order: String(category.sort_order ?? 0),
+      is_active: category.is_active === false ? 'false' : 'true',
     })
   }
 
@@ -314,6 +322,7 @@ export default function AdminPage() {
         slug: slugify(categoryForm.slug || categoryForm.name),
         icon: categoryForm.icon || null,
         sort_order: Number(categoryForm.sort_order || 0),
+        is_active: categoryForm.is_active === 'true',
       }
 
       if (editingCategoryId) await categoriesApi.update(editingCategoryId, payload)
@@ -321,6 +330,7 @@ export default function AdminPage() {
 
       toast.success(editingCategoryId ? 'Kategori güncellendi' : 'Kategori eklendi')
       resetCategoryForm()
+      window.dispatchEvent(new Event('satgo:categories-updated'))
       load()
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Kategori kaydedilemedi')
@@ -335,9 +345,21 @@ export default function AdminPage() {
       await categoriesApi.delete(id)
       toast.success('Kategori silindi')
       if (editingCategoryId === String(id)) resetCategoryForm()
+      window.dispatchEvent(new Event('satgo:categories-updated'))
       load()
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Kategori silinemedi')
+    }
+  }
+
+  const toggleCategoryActive = async (category: any) => {
+    try {
+      await categoriesApi.update(category.id, { is_active: category.is_active === false })
+      toast.success(category.is_active === false ? 'Kategori aktif edildi' : 'Kategori pasife alındı')
+      window.dispatchEvent(new Event('satgo:categories-updated'))
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Kategori durumu değiştirilemedi')
     }
   }
 
@@ -360,6 +382,7 @@ export default function AdminPage() {
       }
       toast.success('Kategori CSV aktarıldı')
       setCategoryCsvFile(null)
+      window.dispatchEvent(new Event('satgo:categories-updated'))
       load()
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Kategori CSV aktarılamadı')
@@ -368,14 +391,7 @@ export default function AdminPage() {
     }
   }
 
-  const categoryRows = categories.flatMap((category) => [
-    { ...category, parent_name: '', depth: 0 },
-    ...(category.sub_categories || []).map((sub: any) => ({
-      ...sub,
-      parent_name: category.name,
-      depth: 1,
-    })),
-  ])
+  const categoryRows = flattenCategories(categories)
 
   if (!user) {
     return (
@@ -626,16 +642,16 @@ export default function AdminPage() {
           </div>
         </form>
 
-        <form onSubmit={saveCategory} className="p-4 grid gap-3 lg:grid-cols-[1fr_1fr_140px_120px_auto] lg:items-end border-b border-gray-100">
+        <form onSubmit={saveCategory} className="p-4 grid gap-3 lg:grid-cols-[1fr_1fr_140px_120px_120px_auto] lg:items-end border-b border-gray-100">
           <div>
             <label className="label">Üst kategori</label>
             <select value={categoryForm.parent_id} onChange={setCategory('parent_id')} className="input">
               <option value="">Ana kategori</option>
-              {categories
+              {categoryRows
                 .filter((category) => String(category.id) !== editingCategoryId)
                 .map((category) => (
                   <option key={category.id} value={category.id}>
-                    {category.name}
+                    {'- '.repeat(category.depth)}{category.name}
                   </option>
                 ))}
             </select>
@@ -652,6 +668,13 @@ export default function AdminPage() {
             <label className="label">Sıra</label>
             <input type="number" value={categoryForm.sort_order} onChange={setCategory('sort_order')} className="input" />
           </div>
+          <div>
+            <label className="label">Durum</label>
+            <select value={categoryForm.is_active} onChange={setCategory('is_active')} className="input">
+              <option value="true">Aktif</option>
+              <option value="false">Pasif</option>
+            </select>
+          </div>
           <div className="flex gap-2">
             <button disabled={savingCategory} className="btn-brand flex min-w-[120px] items-center justify-center gap-2 whitespace-nowrap">
               <Save className="h-4 w-4" />
@@ -663,7 +686,7 @@ export default function AdminPage() {
               </button>
             )}
           </div>
-          <div className="lg:col-span-5">
+          <div className="lg:col-span-6">
             <label className="label">İkon</label>
             <input value={categoryForm.icon} onChange={setCategory('icon')} className="input max-w-xs" placeholder="Emoji veya kısa ikon" />
           </div>
@@ -677,6 +700,7 @@ export default function AdminPage() {
                 <th className="text-left p-3">Üst kategori</th>
                 <th className="text-left p-3">Slug</th>
                 <th className="text-left p-3">Sıra</th>
+                <th className="text-left p-3">Durum</th>
                 <th className="text-right p-3">İşlem</th>
               </tr>
             </thead>
@@ -690,12 +714,20 @@ export default function AdminPage() {
                   <td className="p-3 font-mono text-xs">{category.slug}</td>
                   <td className="p-3">{category.sort_order ?? 0}</td>
                   <td className="p-3">
+                    <span className={`rounded-full px-2 py-1 text-xs font-black ${category.is_active === false ? 'bg-gray-100 text-gray-500' : 'bg-emerald-100 text-emerald-700'}`}>
+                      {category.is_active === false ? 'Pasif' : 'Aktif'}
+                    </span>
+                  </td>
+                  <td className="p-3">
                     <div className="flex justify-end gap-2">
-                      <button onClick={() => editCategory(category)} type="button" className="btn-outline flex items-center gap-1 px-3 py-1.5 text-xs">
-                        <Pencil className="h-3.5 w-3.5" />
-                        Düzenle
-                      </button>
-                      <button onClick={() => deleteCategory(category.id)} type="button" className="btn-outline flex items-center gap-1 px-3 py-1.5 text-xs text-red-500">
+                    <button onClick={() => editCategory(category)} type="button" className="btn-outline flex items-center gap-1 px-3 py-1.5 text-xs">
+                      <Pencil className="h-3.5 w-3.5" />
+                      Düzenle
+                    </button>
+                    <button onClick={() => toggleCategoryActive(category)} type="button" className="btn-outline px-3 py-1.5 text-xs">
+                      {category.is_active === false ? 'Aktifleştir' : 'Pasifleştir'}
+                    </button>
+                    <button onClick={() => deleteCategory(category.id)} type="button" className="btn-outline flex items-center gap-1 px-3 py-1.5 text-xs text-red-500">
                         <Trash2 className="h-3.5 w-3.5" />
                         Sil
                       </button>
@@ -704,7 +736,7 @@ export default function AdminPage() {
                 </tr>
               ))}
               {!loading && !categoryRows.length && (
-                <tr><td colSpan={5} className="p-8 text-center text-gray-400">Kategori yok.</td></tr>
+                <tr><td colSpan={6} className="p-8 text-center text-gray-400">Kategori yok.</td></tr>
               )}
             </tbody>
           </table>

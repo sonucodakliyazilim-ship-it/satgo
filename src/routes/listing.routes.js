@@ -3,6 +3,7 @@ const { body, param } = require('express-validator');
 const ctrl = require('../controllers/listing.controller');
 const { authenticate, optionalAuth, requireOwner } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
+const { upload } = require('../controllers/upload.controller');
 
 router.get('/', optionalAuth, ctrl.getListings);
 
@@ -11,6 +12,12 @@ router.get('/me', authenticate, ctrl.getMyListings);
 router.get('/home-sections', optionalAuth, ctrl.getHomeSections);
 
 router.get('/user/:userId', ctrl.getUserListings);
+
+router.post('/with-images',
+  authenticate,
+  upload.array('images', 10),
+  ctrl.createListingWithImages,
+);
 
 router.get('/:id',
   param('id').isUUID(),

@@ -11,7 +11,7 @@ type CustomField = {
   sub_category_id?: number | null
   field_key: string
   label: string
-  field_type: 'text' | 'number' | 'select' | 'boolean'
+  field_type: 'input' | 'text' | 'number' | 'select' | 'checkbox' | 'boolean' | 'textarea' | 'radio' | 'multi_select'
   is_required: boolean
   sort_order: number
   is_active: boolean
@@ -24,12 +24,62 @@ const emptyForm = {
   sub_category_id: '',
   field_key: '',
   label: '',
-  field_type: 'text',
+  field_type: 'input',
   is_required: 'false',
   sort_order: '0',
   is_active: 'true',
   optionsText: '',
 }
+
+const slugifyKey = (value: string) =>
+  value
+    .trim()
+    .toLocaleLowerCase('tr-TR')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+
+const flattenCategories = (items: any[] = [], depth = 0, parent?: any): any[] =>
+  items.flatMap((item) => [
+    { ...item, depth, parent },
+    ...flattenCategories(item.sub_categories || [], depth + 1, item),
+  ])
+
+const rootIdOf = (category: any): string => {
+  let current = category
+  while (current?.parent) current = current.parent
+  return String(current?.id || category?.id || '')
+}
+
+const fullCategoryName = (category: any): string => {
+  const names = []
+  let current = category
+  while (current) {
+    names.unshift(current.name)
+    current = current.parent
+  }
+  return names.join(' / ')
+}
+
+const typeLabel = (type: string) =>
+  ({
+    input: 'Kısa yazı',
+    text: 'Kısa yazı',
+    number: 'Sayı',
+    select: 'Seçenek listesi',
+    checkbox: 'Onay kutusu',
+    boolean: 'Onay kutusu',
+    textarea: 'Uzun metin',
+    radio: 'Tek seçim',
+    multi_select: 'Çoklu seçim',
+  })[type] || type
 
 const parseOptionsText = (text: string) => {
   return String(text || '')
@@ -58,7 +108,7 @@ export default function CustomFieldsManager() {
   const load = async () => {
     setLoading(true)
     try {
-      const [c, f] = await Promise.all([categoriesApi.getAll(), customFieldsApi.adminList()])
+      const [c, f] = await Promise.all([categoriesApi.getAll({ include_inactive: true }), customFieldsApi.adminList()])
       setCategories(c.data.data || [])
       setFields(f.data.data || [])
     } catch (err: any) {
@@ -75,9 +125,10 @@ export default function CustomFieldsManager() {
   const reset = () => setForm(emptyForm)
 
   const categoryOptions = useMemo(() => {
-    const roots = categories || []
-    const subs = roots.flatMap((c: any) => (c.sub_categories || []).map((s: any) => ({ ...s, parent: c })))
-    return { roots, subs }
+    const all = flattenCategories(categories || [])
+    const roots = all.filter((category: any) => !category.parent_id)
+    const subs = all.filter((category: any) => category.parent_id)
+    return { roots, subs, all }
   }, [categories])
 
   const save = async (e: React.FormEvent) => {
@@ -88,14 +139,14 @@ export default function CustomFieldsManager() {
         ...(form.id ? { id: form.id } : {}),
         category_id: Number(form.category_id),
         sub_category_id: form.sub_category_id ? Number(form.sub_category_id) : null,
-        field_key: String(form.field_key || '').trim(),
+        field_key: slugifyKey(form.field_key || form.label),
         label: String(form.label || '').trim(),
         field_type: form.field_type,
         is_required: form.is_required === 'true',
         sort_order: Number(form.sort_order || 0),
         is_active: form.is_active === 'true',
       }
-      if (form.field_type === 'select') {
+      if (['select', 'radio', 'multi_select'].includes(form.field_type)) {
         payload.options = parseOptionsText(form.optionsText)
       }
       await customFieldsApi.adminUpsert(payload)
@@ -116,7 +167,7 @@ export default function CustomFieldsManager() {
       sub_category_id: field.sub_category_id ? String(field.sub_category_id) : '',
       field_key: field.field_key || '',
       label: field.label || '',
-      field_type: field.field_type || 'text',
+      field_type: field.field_type === 'text' ? 'input' : field.field_type === 'boolean' ? 'checkbox' : field.field_type || 'input',
       is_required: field.is_required ? 'true' : 'false',
       sort_order: String(field.sort_order ?? 0),
       is_active: field.is_active ? 'true' : 'false',
@@ -139,8 +190,8 @@ export default function CustomFieldsManager() {
   return (
     <section className="card overflow-hidden border-2 border-brand/20">
       <div className="p-4 border-b border-gray-100">
-        <h2 className="font-black">Custom Field (Alan) Yönetimi</h2>
-        <p className="text-sm text-gray-500 mt-1">Kategoriye göre dinamik alanları (ör. Renk, KM, Beden, Marka vb) ekle/düzenle.</p>
+        <h2 className="font-black">Alan Yönetimi</h2>
+        <p className="text-sm text-gray-500 mt-1">Kategori seçilince ilan verme formunda otomatik açılacak alanları buradan ekle.</p>
       </div>
 
       <form onSubmit={save} className="p-4 grid gap-3 lg:grid-cols-[1fr_1fr_1fr_160px_120px_120px_auto] lg:items-end border-b border-gray-100">
@@ -158,27 +209,45 @@ export default function CustomFieldsManager() {
           <select value={form.sub_category_id} onChange={(e) => setForm((f: any) => ({ ...f, sub_category_id: e.target.value }))} className="input" disabled={!form.category_id}>
             <option value="">Yok</option>
             {categoryOptions.subs
-              .filter((s: any) => String(s.parent?.id) === String(form.category_id))
+              .filter((s: any) => rootIdOf(s) === String(form.category_id))
               .map((s: any) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
+                <option key={s.id} value={s.id}>{fullCategoryName(s)}</option>
               ))}
           </select>
         </div>
         <div>
-          <label className="label">Key *</label>
-          <input value={form.field_key} onChange={(e) => setForm((f: any) => ({ ...f, field_key: e.target.value }))} className="input" placeholder="orn: color, km, size" required />
+          <label className="label">Alan adı *</label>
+          <input
+            value={form.label}
+            onChange={(e) =>
+              setForm((f: any) => ({
+                ...f,
+                label: e.target.value,
+                field_key:
+                  !f.id && (!f.field_key || f.field_key === slugifyKey(f.label))
+                    ? slugifyKey(e.target.value)
+                    : f.field_key,
+              }))
+            }
+            className="input"
+            placeholder="Örn: Renk, KM, Yakıt tipi"
+            required
+          />
         </div>
         <div>
-          <label className="label">Etiket *</label>
-          <input value={form.label} onChange={(e) => setForm((f: any) => ({ ...f, label: e.target.value }))} className="input" placeholder="Görünecek isim" required />
+          <label className="label">Teknik anahtar</label>
+          <input value={form.field_key} onChange={(e) => setForm((f: any) => ({ ...f, field_key: e.target.value }))} className="input" placeholder="Otomatik oluşur" />
         </div>
         <div>
           <label className="label">Tip</label>
           <select value={form.field_type} onChange={(e) => setForm((f: any) => ({ ...f, field_type: e.target.value }))} className="input">
-            <option value="text">Yazı</option>
+            <option value="input">Kısa yazı</option>
             <option value="number">Sayı</option>
-            <option value="select">Dropdown</option>
-            <option value="boolean">Evet/Hayır</option>
+            <option value="select">Seçenek listesi</option>
+            <option value="radio">Tek seçim</option>
+            <option value="multi_select">Çoklu seçim</option>
+            <option value="checkbox">Onay kutusu</option>
+            <option value="textarea">Uzun metin</option>
           </select>
         </div>
         <div>
@@ -202,15 +271,15 @@ export default function CustomFieldsManager() {
           </button>
         </div>
 
-        {form.field_type === 'select' && (
+        {['select', 'radio', 'multi_select'].includes(form.field_type) && (
           <div className="lg:col-span-8">
-            <label className="label">Dropdown seçenekleri (satır satır). Format: `value` veya `value|label`</label>
+            <label className="label">Seçenekler (her satıra bir seçenek)</label>
             <textarea
               value={form.optionsText}
               onChange={(e) => setForm((f: any) => ({ ...f, optionsText: e.target.value }))}
               rows={4}
               className="input resize-none font-mono text-xs"
-              placeholder={'red|Kırmızı\nblue|Mavi\nblack|Siyah'}
+              placeholder={'Kırmızı\nMavi\nSiyah'}
             />
           </div>
         )}
@@ -244,7 +313,7 @@ export default function CustomFieldsManager() {
                   {String((f as any).category_name || f.category_id)}
                   {(f as any).sub_category_name ? <span className="text-gray-400"> / {(f as any).sub_category_name}</span> : null}
                 </td>
-                <td className="p-3">{f.field_type}</td>
+                <td className="p-3">{typeLabel(f.field_type)}</td>
                 <td className="p-3">{f.is_required ? 'Evet' : 'Hayır'}</td>
                 <td className="p-3">{f.sort_order ?? 0}</td>
                 <td className="p-3">
@@ -269,4 +338,3 @@ export default function CustomFieldsManager() {
     </section>
   )
 }
-

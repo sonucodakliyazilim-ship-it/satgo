@@ -334,7 +334,7 @@ function MyListingRow({
   return (
     <div className="p-4 flex flex-col lg:flex-row lg:items-center gap-4">
       <Link href={`/ilan/${listing.id}`} className="flex items-center gap-3 min-w-0 flex-1">
-        <ListingImage img={img} title={listing.title} fallback={listing.category_icon} />
+        <ListingImage img={img} title={listing.title} />
         <div className="min-w-0">
           <p className="font-black truncate">{listing.title}</p>
           <p className="text-sm text-gray-500 truncate">
@@ -401,10 +401,10 @@ function DealRow({ item }: { item: any }) {
   )
 }
 
-function ListingImage({ img, title, fallback }: { img: string | null; title: string; fallback?: string }) {
+function ListingImage({ img, title }: { img: string | null; title: string }) {
   return (
     <div className="w-20 h-16 rounded-lg bg-gray-100 overflow-hidden flex items-center justify-center shrink-0">
-      {img ? <img src={img} alt={title} className="w-full h-full object-cover" /> : <span className="text-2xl">{fallback || '•'}</span>}
+      {img ? <img src={img} alt={title} className="w-full h-full object-cover" /> : <span className="px-2 text-center text-[10px] font-bold text-gray-400">Fotoğraf yok</span>}
     </div>
   )
 }

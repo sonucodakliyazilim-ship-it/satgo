@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { categoriesApi, customFieldsApi, hierarchyApi, listingsApi, uploadApi } from '@/lib/api'
+import { categoriesApi, customFieldsApi, hierarchyApi, listingsApi } from '@/lib/api'
 import { defaultCategories } from '@/lib/defaultCategories'
 import { useAuthStore } from '@/lib/store'
 import cities from '@/lib/cities.json'
@@ -67,6 +67,74 @@ type HierarchyNode = {
   id: string
   label: string
   children?: HierarchyNode[]
+}
+
+type CategoryNode = {
+  id: number | string
+  name: string
+  slug: string
+  icon?: string
+  parent_id?: number | string | null
+  sub_categories?: CategoryNode[]
+}
+
+type CustomField = {
+  id: string
+  label: string
+  field_type: 'input' | 'text' | 'number' | 'select' | 'checkbox' | 'boolean' | 'textarea' | 'radio' | 'multi_select'
+  is_required?: boolean
+  options?: Array<{ value: string; label: string }>
+}
+
+const MAX_IMAGE_COUNT = 10
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024
+const IMAGE_UPLOAD_EDGE = 1600
+const IMAGE_UPLOAD_QUALITY = 0.82
+const DISPLAYABLE_IMAGE_RE = /\.(jpe?g|jfif|png|webp|avif|gif)$/i
+
+const isDisplayableImageFile = (file: File) => {
+  const mime = (file.type || '').toLowerCase()
+  const allowedMimes = ['image/jpeg', 'image/pjpeg', 'image/png', 'image/webp', 'image/avif', 'image/gif']
+  return mime ? allowedMimes.includes(mime) : DISPLAYABLE_IMAGE_RE.test(file.name)
+}
+
+const canvasToBlob = (canvas: HTMLCanvasElement, type: string, quality: number) =>
+  new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, quality))
+
+const compressImageForUpload = async (file: File) => {
+  if (typeof window === 'undefined') return file
+  if (!file.type.startsWith('image/') || file.type === 'image/gif' || /\.gif$/i.test(file.name)) return file
+  if (file.size <= 900 * 1024 && !/\.png$/i.test(file.name)) return file
+
+  try {
+    const bitmap = await createImageBitmap(file)
+    const longestEdge = Math.max(bitmap.width, bitmap.height)
+    const scale = Math.min(1, IMAGE_UPLOAD_EDGE / longestEdge)
+    const width = Math.max(1, Math.round(bitmap.width * scale))
+    const height = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      bitmap.close?.()
+      return file
+    }
+
+    ctx.fillStyle = '#fff'
+    ctx.fillRect(0, 0, width, height)
+    ctx.drawImage(bitmap, 0, 0, width, height)
+    bitmap.close?.()
+
+    const blob = await canvasToBlob(canvas, 'image/jpeg', IMAGE_UPLOAD_QUALITY)
+    if (!blob || blob.size >= file.size) return file
+
+    const safeName = file.name.replace(/\.[^.]+$/, '') || 'satgo-fotograf'
+    return new File([blob], `${safeName}.jpg`, { type: 'image/jpeg', lastModified: Date.now() })
+  } catch {
+    return file
+  }
 }
 
 const VEHICLE_BRANDS: Record<string, string[]> = {
@@ -164,10 +232,26 @@ const HIERARCHY_LABELS: Record<string, string[]> = {
   diger: ['Grup', 'Alt Grup', 'Tür', 'Detay'],
 }
 
-const getHierarchyGroup = (category?: any) => {
+const findCategoryById = (categories: CategoryNode[], id?: string): CategoryNode | null => {
+  if (!id) return null
+  for (const category of categories) {
+    if (String(category.id) === String(id)) return category
+    const child = findCategoryById(category.sub_categories || [], id)
+    if (child) return child
+  }
+  return null
+}
+
+const getCategoryChildren = (categories: CategoryNode[], id?: string) => {
+  if (!id) return categories
+  return findCategoryById(categories, id)?.sub_categories || []
+}
+
+const getHierarchyGroup = (category?: CategoryNode | null, rootCategory?: CategoryNode | null) => {
   if (!category?.slug) return ''
-  if (category.slug === 'arac') return 'vehicle'
-  if (category.slug === 'motor') return 'motor'
+  const rootSlug = rootCategory?.slug || category.slug
+  if (rootSlug === 'arac') return 'vehicle'
+  if (rootSlug === 'motor') return 'motor'
   return category.slug
 }
 
@@ -191,17 +275,20 @@ const getNodePath = (nodes: HierarchyNode[], labels: string[]) => {
 export default function CreateListingPage() {
   const router = useRouter()
   const { user, authReady, setUser } = useAuthStore()
-  const [categories, setCategories] = useState<any[]>(defaultCategories)
+  const [categories, setCategories] = useState<CategoryNode[]>(defaultCategories)
   const [vehicleTree, setVehicleTree] = useState<HierarchyNode[]>(fallbackVehicleTree)
   const [motorTree, setMotorTree] = useState<HierarchyNode[]>(fallbackMotorTree)
   const [genericTree, setGenericTree] = useState<HierarchyNode[]>([])
   const [genericSelections, setGenericSelections] = useState<string[]>([])
   const [hierarchyLoading, setHierarchyLoading] = useState(false)
   const [groupLabels, setGroupLabels] = useState<Record<string, string[]>>({})
-  const [customFields, setCustomFields] = useState<any[]>([])
+  const [customFields, setCustomFields] = useState<CustomField[]>([])
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, any>>({})
+  const [categoryPath, setCategoryPath] = useState<string[]>([])
   const [files, setFiles] = useState<File[]>([])
+  const [previews, setPreviews] = useState<Array<{ file: File; url: string }>>([])
   const [saving, setSaving] = useState(false)
+  const [savingLabel, setSavingLabel] = useState('')
   const [form, setForm] = useState({
     category_id: '',
     sub_category_id: '',
@@ -255,7 +342,7 @@ export default function CreateListingPage() {
 
   useEffect(() => {
     categoriesApi
-      .getAll()
+      .getAll({ _ts: Date.now() })
       .then(({ data }) => setCategories(data.data?.length ? data.data : defaultCategories))
       .catch(() => setCategories(defaultCategories))
   }, [])
@@ -272,8 +359,37 @@ export default function CreateListingPage() {
       .catch(() => setMotorTree(fallbackMotorTree))
   }, [])
 
-  const selectedCategory = categories.find((c) => String(c.id) === form.category_id)
-  const selectedHierarchyGroup = getHierarchyGroup(selectedCategory)
+  const selectedCategory = findCategoryById(categories, categoryPath[0] || form.category_id)
+  const selectedLeafCategory = findCategoryById(categories, categoryPath[categoryPath.length - 1] || form.sub_category_id || form.category_id)
+  const selectedSubCategory = selectedLeafCategory && selectedCategory && String(selectedLeafCategory.id) !== String(selectedCategory.id)
+    ? selectedLeafCategory
+    : null
+  const selectedHierarchyGroup = getHierarchyGroup(selectedLeafCategory, selectedCategory)
+  const isVehicleCategory = selectedCategory?.slug === 'arac'
+  const isMotorCategory = selectedCategory?.slug === 'motor'
+  const isRealEstateCategory = selectedCategory?.slug === 'emlak'
+  const categoryLevels = useMemo(() => {
+    const levels: Array<{ label: string; value: string; options: CategoryNode[]; required: boolean }> = []
+    let parentId = ''
+    let options = getCategoryChildren(categories)
+    let level = 0
+
+    while (options.length) {
+      const value = categoryPath[level] || ''
+      levels.push({
+        label: level === 0 ? 'Kategori *' : `${level + 1}. seviye kategori *`,
+        value,
+        options,
+        required: true,
+      })
+      if (!value) break
+      parentId = value
+      options = getCategoryChildren(categories, parentId)
+      level += 1
+    }
+
+    return levels
+  }, [categories, categoryPath])
 
   const effectiveLevelLabel = (level: number) => {
     const override = groupLabels[selectedHierarchyGroup]?.[level]
@@ -364,7 +480,36 @@ export default function CreateListingPage() {
     [selectedCity?.cityCode],
   )
 
-  const previews = useMemo(() => files.map((file) => ({ file, url: URL.createObjectURL(file) })), [files])
+  useEffect(() => {
+    const next = files.map((file) => ({ file, url: URL.createObjectURL(file) }))
+    setPreviews(next)
+    return () => {
+      next.forEach((item) => URL.revokeObjectURL(item.url))
+    }
+  }, [files])
+
+  const setCategoryLevel = (level: number, value: string) => {
+    const nextPath = value ? [...categoryPath.slice(0, level), value] : categoryPath.slice(0, level)
+    const rootId = nextPath[0] || ''
+    const leafId = nextPath[nextPath.length - 1] || ''
+
+    setCategoryPath(nextPath)
+    setGenericSelections([])
+    setForm((f) => ({
+      ...f,
+      category_id: rootId,
+      sub_category_id: leafId && leafId !== rootId ? leafId : '',
+      vehicle_brand: '',
+      vehicle_model: '',
+      vehicle_series: '',
+      vehicle_package: '',
+      moto_brand: '',
+      moto_model: '',
+      moto_series: '',
+      moto_package: '',
+    }))
+  }
+
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const value = e.target.value
     if (key === 'category_id') setGenericSelections([])
@@ -384,27 +529,22 @@ export default function CreateListingPage() {
 
   const chooseFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files || [])
-    const maxBytes = 15 * 1024 * 1024
-    const accepted = selected.filter(
-      (file) =>
-        file.type.startsWith('image/') ||
-        /\.(jpe?g|jfif|png|webp|avif|gif|heic|heif)$/i.test(file.name),
-    )
-    const sized = accepted.filter((file) => file.size <= maxBytes)
-    const room = Math.max(10 - files.length, 0)
+    const accepted = selected.filter(isDisplayableImageFile)
+    const sized = accepted.filter((file) => file.size <= MAX_IMAGE_BYTES)
+    const room = Math.max(MAX_IMAGE_COUNT - files.length, 0)
 
     if (!room) {
-      toast.error('En fazla 10 fotoğraf yükleyebilirsin.')
+      toast.error('En fazla 10 fotograf yukleyebilirsin.')
       e.target.value = ''
       return
     }
 
     if (accepted.length !== selected.length) {
-      toast.error('Sadece görsel dosyaları yüklenebilir.')
+      toast.error('Sadece JPG, PNG, WEBP, AVIF veya GIF yuklenebilir. HEIC dosyalari tarayicida gorunmedigi icin kabul edilmiyor.')
     }
 
     if (sized.length !== accepted.length) {
-      toast.error('Fotoğraf boyutu en fazla 15 MB olabilir.')
+      toast.error('Fotograf boyutu en fazla 15 MB olabilir.')
     }
 
     setFiles((current) => [...current, ...sized.slice(0, room)])
@@ -422,7 +562,12 @@ export default function CreateListingPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user) return router.push('/giris')
+    if (!files.length) {
+      toast.error('Ilan yayinlamak icin en az 1 gercek fotograf ekle.')
+      return
+    }
     setSaving(true)
+    setSavingLabel('Ilan kaydediliyor...')
     try {
       const vehicleLabels = [form.vehicle_brand, form.vehicle_model, form.vehicle_series, form.vehicle_package].filter(Boolean)
       const vehiclePath = [selectedVehicleBrand, selectedVehicleModel, selectedVehicleSeries, selectedVehiclePackage]
@@ -434,9 +579,9 @@ export default function CreateListingPage() {
         .map((item: any) => item.id)
       const genericLabels = genericSelections.filter(Boolean)
       const hierarchyLabels =
-        selectedCategory?.slug === 'arac' ? vehicleLabels : selectedCategory?.slug === 'motor' ? motorLabels : genericLabels
+        isVehicleCategory ? vehicleLabels : isMotorCategory ? motorLabels : genericLabels
       const hierarchyPath =
-        selectedCategory?.slug === 'arac' ? vehiclePath : selectedCategory?.slug === 'motor' ? motorPath : genericNodePath.map((item) => item.id)
+        isVehicleCategory ? vehiclePath : isMotorCategory ? motorPath : genericNodePath.map((item) => item.id)
 
       const payload: any = {
         category_id: Number(form.category_id),
@@ -452,10 +597,10 @@ export default function CreateListingPage() {
         hierarchy_path: hierarchyPath,
         custom_fields: customFields
           .map((f: any) => ({ field_id: f.id, value: customFieldValues[f.id] }))
-          .filter((x: any) => x.value !== undefined && x.value !== ''),
+          .filter((x: any) => Array.isArray(x.value) ? x.value.length > 0 : x.value !== undefined && x.value !== ''),
       }
 
-      if (selectedCategory?.slug === 'arac') {
+      if (isVehicleCategory) {
         payload.vehicle_details = {
           brand: form.vehicle_brand,
           model: form.vehicle_model,
@@ -486,7 +631,7 @@ export default function CreateListingPage() {
         }
       }
 
-      if (selectedCategory?.slug === 'motor') {
+      if (isMotorCategory) {
         payload.motorcycle_details = {
           brand: form.moto_brand,
           model: form.moto_model,
@@ -500,7 +645,7 @@ export default function CreateListingPage() {
         }
       }
 
-      if (selectedCategory?.slug === 'emlak') {
+      if (isRealEstateCategory) {
         payload.real_estate_details = {
           listing_type: form.listing_type,
           size_m2: Number(form.size_m2) || undefined,
@@ -513,28 +658,17 @@ export default function CreateListingPage() {
         }
       }
 
-      const { data } = await listingsApi.create(payload)
+      setSavingLabel('Fotograflar hazirlaniyor...')
+      const preparedFiles = await Promise.all(files.map(compressImageForUpload))
+      const fd = new FormData()
+      fd.append('payload', JSON.stringify(payload))
+      preparedFiles.forEach((file) => fd.append('images', file))
+
+      setSavingLabel('Ilan ve fotograflar yukleniyor...')
+      const { data } = await listingsApi.createWithImages(fd)
       const listingId = data.data.id
 
-      if (files.length) {
-        const fd = new FormData()
-        files.forEach((file) => fd.append('images', file))
-
-        try {
-          await uploadApi.uploadImages(listingId, fd)
-        } catch (uploadErr: any) {
-          const uploadMessage =
-            uploadErr?.code === 'ECONNABORTED'
-              ? 'Fotoğraf yükleme zaman aşımına uğradı. Daha az fotoğrafla veya daha küçük dosyalarla tekrar deneyebilirsin.'
-              : uploadErr?.response?.data?.message ||
-                'İlan oluşturuldu ama fotoğraflar yüklenemedi. İlan detayından tekrar deneyebilirsin.'
-
-          toast.error(uploadMessage)
-          router.push(`/ilan/${listingId}`)
-          return
-        }
-      }
-      toast.success('İlan oluşturuldu')
+      toast.success('Ilan fotograflarla olusturuldu')
       router.push(`/ilan/${listingId}`)
     } catch (err: any) {
       if (err?.response?.status === 401) {
@@ -547,6 +681,7 @@ export default function CreateListingPage() {
       toast.error(err?.response?.data?.errors?.[0]?.message || err?.response?.data?.message || 'İlan oluşturulamadı')
     } finally {
       setSaving(false)
+      setSavingLabel('')
     }
   }
 
@@ -579,39 +714,41 @@ export default function CreateListingPage() {
           <input value={form.title} onChange={set('title')} required minLength={5} maxLength={200} className="input" placeholder="İlan başlığı" />
         </div>
 
-        <div className="grid md:grid-cols-2 gap-3">
-          <div>
-            <label className="label">Kategori *</label>
-            <select value={form.category_id} onChange={set('category_id')} required className="input">
-              <option value="">Kategori seç</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}</option>)}
-            </select>
-          </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {categoryLevels.map((level, index) => (
+            <div key={`category-level-${index}`}>
+              <label className="label">{level.label}</label>
+              <select
+                value={level.value}
+                onChange={(e) => setCategoryLevel(index, e.target.value)}
+                required={level.required}
+                className="input"
+              >
+                <option value="">{index === 0 ? 'Kategori seç' : 'Alt kategori seç'}</option>
+                {level.options.map((c) => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ` : ''}{c.name}</option>)}
+              </select>
+            </div>
+          ))}
           <div>
             <label className="label">Fiyat (₺)</label>
             <input type="number" min="0" value={form.price} onChange={set('price')} className="input" />
           </div>
         </div>
 
-        {!!selectedCategory?.sub_categories?.length && (
-          <div>
-            <label className="label">Alt Kategori</label>
-            <select value={form.sub_category_id} onChange={set('sub_category_id')} className="input">
-              <option value="">Alt kategori seç</option>
-              {selectedCategory.sub_categories.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-        )}
-
-        {selectedCategory && !['arac', 'motor'].includes(selectedCategory.slug) && (
+        {selectedLeafCategory && !isVehicleCategory && !isMotorCategory && (
           <div className="bg-gray-50 rounded-xl p-4 grid md:grid-cols-2 gap-3">
             <div className="md:col-span-2">
-              <h2 className="font-bold">{selectedCategory.name} Detayları</h2>
+              <h2 className="font-bold">{selectedLeafCategory.name} Detayları</h2>
               <p className="mt-1 text-xs font-semibold text-gray-500">
                 Seçenekler admin panelindeki hiyerarşi ağacından gelir.
               </p>
             </div>
             {hierarchyLoading && <div className="md:col-span-2 text-sm text-gray-500">Seçenekler yükleniyor...</div>}
+            {!hierarchyLoading && !genericLevels.length && (
+              <div className="md:col-span-2 rounded-lg border border-dashed border-gray-200 bg-white p-3 text-sm font-semibold text-gray-500">
+                Bu kategori için ek seçenek bulunmuyor.
+              </div>
+            )}
             {!hierarchyLoading &&
               genericLevels.map((levelOptions, level) => (
                 <Select
@@ -630,7 +767,7 @@ export default function CreateListingPage() {
 
         {!!customFields.length && (
           <div className="bg-gray-50 rounded-xl p-4 grid md:grid-cols-2 gap-3">
-            <h2 className="font-bold md:col-span-2">Ek Alanlar</h2>
+            <h2 className="font-bold md:col-span-2">{selectedLeafCategory?.name || 'Kategori'} Bilgileri</h2>
             {customFields.map((f: any) => {
               const value = customFieldValues[f.id] ?? ''
               const required = !!f.is_required
@@ -641,11 +778,55 @@ export default function CreateListingPage() {
                     label={`${f.label}${required ? ' *' : ''}`}
                     value={value}
                     onChange={(e: any) => setCustomFieldValues((curr) => ({ ...curr, [f.id]: e.target.value }))}
+                    required={required}
                     options={[
                       ['', `${f.label} seç`],
                       ...(f.options || []).map((o: any) => [o.value, o.label]),
                     ]}
                   />
+                )
+              }
+              if (f.field_type === 'radio') {
+                return (
+                  <div key={f.id}>
+                    <label className="label">{f.label}{required ? ' *' : ''}</label>
+                    <div className="grid gap-2 rounded-lg border border-gray-200 bg-white p-3">
+                      {(f.options || []).map((o: any) => (
+                        <label key={o.value} className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                          <input
+                            type="radio"
+                            name={`field-${f.id}`}
+                            value={o.value}
+                            checked={value === o.value}
+                            onChange={(e) => setCustomFieldValues((curr) => ({ ...curr, [f.id]: e.target.value }))}
+                            required={required}
+                            className="h-4 w-4 accent-brand"
+                          />
+                          {o.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )
+              }
+              if (f.field_type === 'multi_select') {
+                const selectedValues = Array.isArray(customFieldValues[f.id]) ? customFieldValues[f.id] : []
+                return (
+                  <div key={f.id}>
+                    <label className="label">{f.label}{required ? ' *' : ''}</label>
+                    <select
+                      multiple
+                      value={selectedValues}
+                      onChange={(e) => {
+                        const selected = Array.from(e.target.selectedOptions).map((option) => option.value)
+                        setCustomFieldValues((curr) => ({ ...curr, [f.id]: selected }))
+                      }}
+                      required={required}
+                      className="input min-h-28"
+                    >
+                      {(f.options || []).map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
                 )
               }
               if (f.field_type === 'boolean') {
@@ -655,12 +836,41 @@ export default function CreateListingPage() {
                     label={`${f.label}${required ? ' *' : ''}`}
                     value={value}
                     onChange={(e: any) => setCustomFieldValues((curr) => ({ ...curr, [f.id]: e.target.value }))}
+                    required={required}
                     options={[
                       ['', `${f.label} seç`],
                       ['true', 'Evet'],
                       ['false', 'Hayır'],
                     ]}
                   />
+                )
+              }
+              if (f.field_type === 'checkbox') {
+                return (
+                  <label key={f.id} className="flex min-h-[46px] items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={!!customFieldValues[f.id]}
+                      onChange={(e) => setCustomFieldValues((curr) => ({ ...curr, [f.id]: e.target.checked }))}
+                      required={required}
+                      className="h-4 w-4 accent-brand"
+                    />
+                    {f.label}{required ? ' *' : ''}
+                  </label>
+                )
+              }
+              if (f.field_type === 'textarea') {
+                return (
+                  <div key={f.id} className="md:col-span-2">
+                    <label className="label">{f.label}{required ? ' *' : ''}</label>
+                    <textarea
+                      value={value}
+                      onChange={(e: any) => setCustomFieldValues((curr) => ({ ...curr, [f.id]: e.target.value }))}
+                      required={required}
+                      rows={4}
+                      className="input resize-y"
+                    />
+                  </div>
                 )
               }
               if (f.field_type === 'number') {
@@ -710,7 +920,7 @@ export default function CreateListingPage() {
           </div>
         </div>
 
-        {selectedCategory?.slug === 'emlak' && (
+        {isRealEstateCategory && (
           <div className="bg-gray-50 rounded-xl p-4 grid md:grid-cols-2 gap-3">
             <h2 className="font-bold md:col-span-2">Emlak Bilgileri</h2>
             <Select label="İlan Tipi" value={form.listing_type} onChange={set('listing_type')} options={[['sale', 'Satılık'], ['rent', 'Kiralık']]} />
@@ -724,7 +934,7 @@ export default function CreateListingPage() {
           </div>
         )}
 
-        {selectedCategory?.slug === 'arac' && (
+        {isVehicleCategory && (
           <div className="bg-gray-50 rounded-xl p-4 grid md:grid-cols-2 gap-3">
             <h2 className="font-bold md:col-span-2">Araç Bilgileri</h2>
             <Select
@@ -783,7 +993,7 @@ export default function CreateListingPage() {
           </div>
         )}
 
-        {selectedCategory?.slug === 'motor' && (
+        {isMotorCategory && (
           <div className="bg-gray-50 rounded-xl p-4 grid md:grid-cols-2 gap-3">
             <h2 className="font-bold md:col-span-2">Motor Bilgileri</h2>
             <Select
@@ -826,16 +1036,16 @@ export default function CreateListingPage() {
 
         <div>
           <label className="label">Fotoğraflar</label>
-          <label className="border-2 border-dashed border-gray-200 rounded-xl p-5 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-brand transition-colors">
+          <label className="border-2 border-dashed border-gray-200 rounded-xl p-5 flex min-h-36 cursor-pointer flex-col items-center justify-center gap-2 text-center transition-colors hover:border-brand">
             <ImagePlus className="w-7 h-7 text-brand" />
             <span className="text-sm font-semibold">Fotoğraf seç veya sürükle</span>
-            <span className="text-xs text-gray-400">En fazla 10 adet JPG, PNG, WEBP, AVIF veya HEIC</span>
-            <input type="file" multiple accept="image/*" onChange={chooseFiles} className="hidden" />
+            <span className="text-xs text-gray-400">En fazla 10 adet JPG, PNG, WEBP, AVIF veya GIF</span>
+            <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/avif,image/gif,.jpg,.jpeg,.png,.webp,.avif,.gif" onChange={chooseFiles} className="hidden" />
           </label>
           {!!previews.length && (
-            <div className="grid grid-cols-3 md:grid-cols-5 gap-2 mt-3">
+            <div className="grid grid-cols-2 gap-2 mt-3 sm:grid-cols-3 md:grid-cols-5">
               {previews.map(({ file, url }) => (
-                <div key={file.name} className="relative aspect-square rounded-lg overflow-hidden bg-gray-100">
+                <div key={`${file.name}-${file.size}-${file.lastModified}`} className="relative aspect-square rounded-lg overflow-hidden bg-gray-100">
                   <img src={url} alt="" className="w-full h-full object-cover" />
                   <button type="button" onClick={() => setFiles((all) => all.filter((f) => f !== file))} className="absolute top-1 right-1 bg-white rounded-full p-1 shadow">
                     <X className="w-3 h-3" />
@@ -852,7 +1062,7 @@ export default function CreateListingPage() {
         </div>
 
         <button type="submit" disabled={saving} className="btn-brand w-full">
-          {saving ? 'Kaydediliyor...' : 'İlanı Yayına Hazırla'}
+          {saving ? savingLabel || 'Kaydediliyor...' : 'İlanı Yayına Hazırla'}
         </button>
       </form>
     </div>

@@ -37,7 +37,7 @@ import { findNearestCity, getDistricts, LOCATIONS } from '@/lib/locations'
 
 type CategoryColumn = {
   title: string
-  items?: string[]
+  items?: Array<string | { title: string; href: string }>
   href?: string
 }
 
@@ -106,6 +106,18 @@ const fallbackColumnsForCategory = (category?: NavCategory): CategoryColumn[] =>
   return (category.sub_categories || []).map((item) => ({ title: item.name, href: categorySearchHref(category, item.name) }))
 }
 
+const columnsFromCategoryTree = (category: NavCategory | undefined): CategoryColumn[] => {
+  if (!category) return []
+  return (category.sub_categories || []).map((child) => ({
+    title: child.name,
+    href: categoryHref(child),
+    items: (child.sub_categories || []).map((grandChild) => ({
+      title: grandChild.name,
+      href: categoryHref(grandChild),
+    })),
+  }))
+}
+
 const columnsFromHierarchy = (category: NavCategory | undefined, nodes: HierarchyNode[]): CategoryColumn[] => {
   if (!category || !nodes.length) return fallbackColumnsForCategory(category)
   return nodes.slice(0, 36).map((node) => ({
@@ -134,7 +146,9 @@ export default function Navbar() {
   const activeGroup = groupFromCategory(activeMenuCategory)
   const activeHierarchy = hierarchyByGroup[activeGroup] || []
   const activeColumns = useMemo(
-    () => columnsFromHierarchy(activeMenuCategory, activeHierarchy),
+    () => activeMenuCategory?.sub_categories?.length
+      ? columnsFromCategoryTree(activeMenuCategory)
+      : columnsFromHierarchy(activeMenuCategory, activeHierarchy),
     [activeMenuCategory, activeHierarchy],
   )
   const activeMeta = CATEGORY_META[activeMenuCategory?.slug || ''] || CATEGORY_META.diger
@@ -146,13 +160,20 @@ export default function Navbar() {
     : 'Her Yer'
 
   useEffect(() => {
+    const loadCategories = () => {
     categoriesApi
-      .getAll()
+      .getAll({ _ts: Date.now() })
       .then(({ data }) => setCategories(data.data || []))
       .catch(() => setCategories([]))
+    }
+
+    loadCategories()
+    window.addEventListener('satgo:categories-updated', loadCategories)
+    return () => window.removeEventListener('satgo:categories-updated', loadCategories)
   }, [])
 
   useEffect(() => {
+    if (activeMenuCategory?.sub_categories?.length) return
     if (!categoryOpen || !activeGroup || hierarchyByGroup[activeGroup]) return
 
     setHierarchyLoading(true)
@@ -165,7 +186,7 @@ export default function Navbar() {
         setHierarchyByGroup((current) => ({ ...current, [activeGroup]: [] }))
       })
       .finally(() => setHierarchyLoading(false))
-  }, [activeGroup, categoryOpen, hierarchyByGroup])
+  }, [activeGroup, activeMenuCategory, categoryOpen, hierarchyByGroup])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -442,23 +463,66 @@ export default function Navbar() {
                 {menuCategories.map((category, index) => {
                   const meta = CATEGORY_META[category.slug] || CATEGORY_META.diger
                   const Icon = meta.icon
+                  const active = index === activeCategory
                   return (
-                    <Link
-                      href={categoryHref(category)}
+                    <button
+                      type="button"
                       key={category.slug}
                       onClick={() => {
                         setActiveCategory(index)
-                        setCategoryOpen(false)
                       }}
-                      className="flex min-h-[68px] items-center gap-2 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-sm font-black text-gray-900"
+                      className={`flex min-h-[68px] items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm font-black text-gray-900 ${
+                        active ? 'border-brand bg-brand-light' : 'border-gray-100 bg-gray-50'
+                      }`}
                     >
                       <span className={`w-9 h-9 rounded-full ${meta.color} text-white flex items-center justify-center shrink-0`}>
                         <Icon className="w-5 h-5" />
                       </span>
                       <span className="min-w-0 flex-1 leading-snug">{category.name}</span>
-                    </Link>
+                    </button>
                   )
                 })}
+              </div>
+
+              <div className="border-t border-gray-100 p-3 md:hidden">
+                <Link
+                  href={categoryHref(activeMenuCategory)}
+                  onClick={() => setCategoryOpen(false)}
+                  className="mb-3 block rounded-xl bg-gray-900 px-3 py-2.5 text-sm font-black text-white"
+                >
+                  {activeMenuCategory?.name} ilanlarını gör
+                </Link>
+                <div className="space-y-3">
+                  {activeColumns.map((column) => (
+                    <div key={column.title} className="rounded-xl border border-gray-100 p-3">
+                      <Link
+                        href={column.href || categorySearchHref(activeMenuCategory, column.title)}
+                        onClick={() => setCategoryOpen(false)}
+                        className="font-black text-brand"
+                      >
+                        {column.title}
+                      </Link>
+                      {!!column.items?.length && (
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          {column.items.map((item) => {
+                            const label = typeof item === 'string' ? item : item.title
+                            const href = typeof item === 'string' ? categorySearchHref(activeMenuCategory, item) : item.href
+                            return (
+                              <Link
+                                key={label}
+                                href={href}
+                                onClick={() => setCategoryOpen(false)}
+                                className="rounded-lg bg-gray-50 px-2 py-1.5 text-xs font-bold text-gray-800"
+                              >
+                                {label}
+                              </Link>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="hidden bg-gray-50 py-5 overflow-y-auto md:block">
@@ -510,16 +574,20 @@ export default function Navbar() {
                       </Link>
                       {!!column.items?.length && (
                         <div className="mt-2 space-y-2">
-                          {column.items.map((item) => (
+                          {column.items.map((item) => {
+                            const label = typeof item === 'string' ? item : item.title
+                            const href = typeof item === 'string' ? categorySearchHref(activeMenuCategory, item) : item.href
+                            return (
                             <Link
-                              key={item}
-                              href={categorySearchHref(activeMenuCategory, item)}
+                              key={label}
+                              href={href}
                               onClick={() => setCategoryOpen(false)}
                               className="block text-sm font-medium text-gray-900 hover:text-brand truncate"
                             >
-                              {item}
+                              {label}
                             </Link>
-                          ))}
+                            )
+                          })}
                           <Link
                             href={column.href || categorySearchHref(activeMenuCategory, column.title)}
                             onClick={() => setCategoryOpen(false)}
@@ -573,4 +641,3 @@ function MenuLink({
     </Link>
   )
 }
-

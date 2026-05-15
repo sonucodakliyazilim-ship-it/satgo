@@ -1,4 +1,5 @@
 const { query, withTransaction } = require('../config/database');
+const crypto = require('crypto');
 
 const makeKey = (value) =>
   String(value || '')
@@ -22,16 +23,19 @@ const normalizeFieldType = (value) => {
     boolean: 'checkbox',
     bool: 'checkbox',
     dropdown: 'select',
+    multiselect: 'multi_select',
+    multiple: 'multi_select',
+    multi: 'multi_select',
   };
   return aliases[type] || type;
 };
 
-const ensureTables = async () => {
-  await query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+const OPTION_FIELD_TYPES = new Set(['select', 'radio', 'multi_select']);
 
+const ensureTables = async () => {
   await query(`
     CREATE TABLE IF NOT EXISTS custom_fields (
-      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      id UUID PRIMARY KEY,
       category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
       sub_category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
       field_key VARCHAR(80) NOT NULL,
@@ -96,7 +100,7 @@ const ensureTables = async () => {
 
   await query(`
     CREATE TABLE IF NOT EXISTS custom_field_options (
-      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      id UUID PRIMARY KEY,
       field_id UUID NOT NULL REFERENCES custom_fields(id) ON DELETE CASCADE,
       value VARCHAR(120) NOT NULL,
       label VARCHAR(160) NOT NULL,
@@ -137,7 +141,7 @@ const getCustomFields = async (req, res, next) => {
 
     const params = [categoryId];
     let fieldSql = `
-      SELECT f.*
+      SELECT f.*, 99999 AS scope_depth
       FROM custom_fields f
       WHERE f.is_active = TRUE
         AND f.category_id = $1
@@ -146,11 +150,21 @@ const getCustomFields = async (req, res, next) => {
     if (subCategoryId) {
       params.push(subCategoryId);
       fieldSql = `
-        SELECT f.*
+        WITH RECURSIVE ancestors AS (
+          SELECT id, parent_id, 0 AS depth
+          FROM categories
+          WHERE id = $2
+          UNION ALL
+          SELECT parent.id, parent.parent_id, ancestors.depth + 1
+          FROM categories parent
+          JOIN ancestors ON ancestors.parent_id = parent.id
+        )
+        SELECT f.*, COALESCE(a.depth, 99999) AS scope_depth
         FROM custom_fields f
+        LEFT JOIN ancestors a ON a.id = f.sub_category_id
         WHERE f.is_active = TRUE
           AND f.category_id = $1
-          AND (f.sub_category_id IS NULL OR f.sub_category_id = $2)
+          AND (f.sub_category_id IS NULL OR f.sub_category_id IN (SELECT id FROM ancestors))
       `;
     }
 
@@ -161,8 +175,10 @@ const getCustomFields = async (req, res, next) => {
     for (const row of rows) {
       const key = row.field_key;
       const existing = byKey.get(key);
+      const rowScore = Number(row.scope_depth ?? 99999);
+      const existingScore = Number(existing?.scope_depth ?? 99999);
       if (!existing) byKey.set(key, row);
-      else if (existing.sub_category_id == null && row.sub_category_id != null) byKey.set(key, row);
+      else if (rowScore < existingScore) byKey.set(key, row);
     }
     const fields = Array.from(byKey.values());
     for (const field of fields) {
@@ -309,8 +325,8 @@ const adminUpsert = async (req, res, next) => {
                WHERE id = $6
                RETURNING *`
             : `INSERT INTO custom_fields
-                 (category_id, sub_category_id, field_key, label, field_type, is_required, sort_order, is_active)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                 (id, category_id, sub_category_id, field_key, label, field_type, is_required, sort_order, is_active)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
                RETURNING *`,
           existing.rows.length
             ? [
@@ -322,6 +338,7 @@ const adminUpsert = async (req, res, next) => {
                 existing.rows[0].id,
               ]
             : [
+                crypto.randomUUID(),
                 category_id,
                 sub_category_id || null,
                 cleanKey,
@@ -338,7 +355,7 @@ const adminUpsert = async (req, res, next) => {
       // Replace options for select fields.
       await client.query('UPDATE custom_field_options SET is_active = FALSE, updated_at = NOW() WHERE field_id = $1', [field.id]);
 
-      if (field.field_type === 'select') {
+      if (OPTION_FIELD_TYPES.has(field.field_type)) {
         for (const opt of cleanOptions) {
           const existingOption = await client.query(
             'SELECT id FROM custom_field_options WHERE field_id = $1 AND value = $2 LIMIT 1',
@@ -357,9 +374,9 @@ const adminUpsert = async (req, res, next) => {
             );
           } else {
             await client.query(
-              `INSERT INTO custom_field_options (field_id, value, label, sort_order, is_active)
-               VALUES ($1,$2,$3,$4,$5)`,
-              [field.id, opt.value, opt.label, opt.sort_order, opt.is_active],
+              `INSERT INTO custom_field_options (id, field_id, value, label, sort_order, is_active)
+               VALUES ($1,$2,$3,$4,$5,$6)`,
+              [crypto.randomUUID(), field.id, opt.value, opt.label, opt.sort_order, opt.is_active],
             );
           }
         }
@@ -419,6 +436,7 @@ const upsertListingCustomFields = async (client, listingId, customFields = []) =
 
     if (type === 'number') valueNumber = value === '' || value == null ? null : Number(value);
     else if (type === 'boolean' || type === 'checkbox') valueBool = value === true || value === 'true' || value === 1 || value === '1';
+    else if (type === 'multi_select') valueText = Array.isArray(value) ? JSON.stringify(value) : value == null ? null : String(value);
     else valueText = value == null ? null : String(value);
 
     const existing = await client.query(

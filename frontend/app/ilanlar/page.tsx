@@ -20,6 +20,33 @@ type DistrictOption = {
   districtName: string
 }
 
+type CategoryOption = {
+  id: string | number
+  slug: string
+  name: string
+  listing_count?: number
+  sub_categories?: CategoryOption[]
+}
+
+const findCategoryBySlug = (categories: CategoryOption[], slug?: string): CategoryOption | null => {
+  if (!slug) return null
+  for (const category of categories) {
+    if (category.slug === slug) return category
+    const child = findCategoryBySlug(category.sub_categories || [], slug)
+    if (child) return child
+  }
+  return null
+}
+
+const renderCategoryOptions = (categories: CategoryOption[], depth = 0): Array<{ category: CategoryOption; label: string }> =>
+  categories.flatMap((category) => [
+    { category, label: `${depth ? `${'- '.repeat(depth)}` : ''}${category.name}` },
+    ...renderCategoryOptions(category.sub_categories || [], depth + 1),
+  ])
+
+const categoryContainsSlug = (category: CategoryOption, slug?: string): boolean =>
+  !!slug && (category.slug === slug || (category.sub_categories || []).some((child) => categoryContainsSlug(child, slug)))
+
 const SORTS = [
   { value: 'newest', label: 'Akıllı Sıralama' },
   { value: 'popular', label: 'En Popüler' },
@@ -126,7 +153,7 @@ function ListingsContent() {
   const params = useSearchParams()
   const selectedCity = useAuthStore((s) => s.selectedCity)
   const selectedDistrict = useAuthStore((s) => s.selectedDistrict)
-  const [categories, setCategories] = useState<any[]>([])
+  const [categories, setCategories] = useState<CategoryOption[]>([])
   const [listings, setListings] = useState<any[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -170,9 +197,10 @@ function ListingsContent() {
   }, [])
 
   const activeCategory = useMemo(
-    () => categories.find((category) => category.slug === filters.kategori),
+    () => findCategoryBySlug(categories, filters.kategori),
     [categories, filters.kategori],
   )
+  const categorySelectOptions = useMemo(() => renderCategoryOptions(categories), [categories])
 
   const fetchListings = useCallback(async () => {
     setLoading(true)
@@ -180,7 +208,7 @@ function ListingsContent() {
       const query: any = { page, sortBy: filters.sortBy }
       if (filters.search) query.search = filters.search
       if (filters.kategori) {
-        const category = categories.find((item) => item.slug === filters.kategori)
+        const category = findCategoryBySlug(categories, filters.kategori)
         if (category) query.category = category.id
       }
       if (filters.city) query.city = filters.city
@@ -318,8 +346,8 @@ function ListingsContent() {
               className="input h-10 text-sm lg:hidden"
             >
               <option value="">Tüm Kategoriler</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.slug}>{category.name}</option>
+              {categorySelectOptions.map(({ category, label }) => (
+                <option key={category.id} value={category.slug}>{label}</option>
               ))}
             </select>
 
@@ -338,15 +366,15 @@ function ListingsContent() {
                   >
                     {category.name} <span className="text-xs text-gray-400">({category.listing_count})</span>
                   </button>
-                  {!!category.sub_categories?.length && filters.kategori === category.slug && (
+                  {!!category.sub_categories?.length && categoryContainsSlug(category, filters.kategori) && (
                     <div className="pl-3 mt-1 space-y-1">
-                      {category.sub_categories.map((sub: any) => (
+                      {renderCategoryOptions(category.sub_categories).map(({ category: sub, label }) => (
                         <button
                           key={sub.id}
-                          onClick={() => setFilter('search', sub.name)}
-                          className="block w-full text-left rounded-lg px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                          onClick={() => setFilter('kategori', sub.slug)}
+                          className={`block w-full text-left rounded-lg px-2 py-1 text-xs ${filters.kategori === sub.slug ? 'bg-brand-light font-black text-brand' : 'text-gray-600 hover:bg-gray-50'}`}
                         >
-                          {sub.name} ({sub.listing_count})
+                          {label} ({sub.listing_count || 0})
                         </button>
                       ))}
                     </div>
