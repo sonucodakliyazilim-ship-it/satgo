@@ -61,6 +61,9 @@ const resolveStoredUploadPath = (url) => {
 
 let uploadSchemaPromise = null;
 
+const shouldEnsureUploadSchemaAtRuntime = () =>
+  process.env.UPLOAD_SCHEMA_ENSURE === 'true' || process.env.NODE_ENV !== 'production';
+
 const ensureUploadSchema = () => {
   if (!uploadSchemaPromise) {
     uploadSchemaPromise = (async () => {
@@ -102,6 +105,9 @@ const ensureUploadSchema = () => {
   return uploadSchemaPromise;
 };
 
+const ensureUploadSchemaForRequest = () =>
+  shouldEnsureUploadSchemaAtRuntime() ? ensureUploadSchema() : Promise.resolve();
+
 const fileFilter = (req, file, cb) => {
   const allowed = ['.jpg', '.jpeg', '.jfif', '.png', '.webp', '.avif', '.gif'];
   const allowedMimes = ['image/jpeg', 'image/pjpeg', 'image/png', 'image/webp', 'image/avif', 'image/gif'];
@@ -133,7 +139,7 @@ const upload = multer({
 });
 
 const insertListingImages = async ({ listingId, files, user }) => {
-  await ensureUploadSchema();
+  await ensureUploadSchemaForRequest();
 
   const listing = await query('SELECT user_id FROM listings WHERE id = $1', [listingId]);
   if (!listing.rows.length) {
@@ -222,7 +228,7 @@ const uploadListingImages = async (req, res, next) => {
 // DELETE /api/upload/listing-images/:imageId
 const deleteListingImage = async (req, res, next) => {
   try {
-    await ensureUploadSchema();
+    await ensureUploadSchemaForRequest();
     const { imageId } = req.params;
     const { rows } = await query(
       `SELECT li.*, l.user_id FROM listing_images li
@@ -265,7 +271,7 @@ const deleteListingImage = async (req, res, next) => {
 // PATCH /api/upload/listing-images/:imageId/primary
 const setPrimaryImage = async (req, res, next) => {
   try {
-    await ensureUploadSchema();
+    await ensureUploadSchemaForRequest();
     const { imageId } = req.params;
     const img = await query(
       'SELECT li.listing_id, l.user_id FROM listing_images li JOIN listings l ON l.id = li.listing_id WHERE li.id = $1',
