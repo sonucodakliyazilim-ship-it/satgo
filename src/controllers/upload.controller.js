@@ -62,7 +62,7 @@ const resolveStoredUploadPath = (url) => {
 let uploadSchemaPromise = null;
 
 const shouldEnsureUploadSchemaAtRuntime = () =>
-  process.env.UPLOAD_SCHEMA_ENSURE === 'true' || process.env.NODE_ENV !== 'production';
+  process.env.UPLOAD_SCHEMA_ENSURE === 'true';
 
 const ensureUploadSchema = () => {
   if (!uploadSchemaPromise) {
