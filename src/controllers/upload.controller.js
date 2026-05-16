@@ -64,9 +64,12 @@ let uploadSchemaPromise = null;
 const ensureUploadSchema = () => {
   if (!uploadSchemaPromise) {
     uploadSchemaPromise = (async () => {
+      await query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"').catch((err) => {
+        console.warn('[upload schema warning]', err.message);
+      });
       await query(`
         CREATE TABLE IF NOT EXISTS listing_images (
-          id UUID PRIMARY KEY,
+          id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
           listing_id UUID NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
           url TEXT NOT NULL,
           sort_order INTEGER DEFAULT 0,
@@ -78,6 +81,7 @@ const ensureUploadSchema = () => {
         'ALTER TABLE listing_images ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0',
         'ALTER TABLE listing_images ADD COLUMN IF NOT EXISTS is_primary BOOLEAN DEFAULT FALSE',
         'ALTER TABLE listing_images ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()',
+        'ALTER TABLE listing_images ALTER COLUMN id SET DEFAULT uuid_generate_v4()',
         'CREATE INDEX IF NOT EXISTS idx_listing_images_listing ON listing_images(listing_id)',
         'CREATE INDEX IF NOT EXISTS idx_listing_images_primary ON listing_images(listing_id, is_primary)',
       ];
@@ -172,12 +176,23 @@ const insertListingImages = async ({ listingId, files, user }) => {
       const url = await saveListingImage(listingId, file);
       savedUrls.push(url);
 
-      const imageId = crypto.randomUUID();
-      const { rows } = await query(
-        `INSERT INTO listing_images (id, listing_id, url, sort_order, is_primary)
-         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-        [imageId, listingId, url, existingCount + idx, !hasPrimary && idx === 0],
-      );
+      let rows;
+      try {
+        const insertedImage = await query(
+          `INSERT INTO listing_images (listing_id, url, sort_order, is_primary)
+           VALUES ($1,$2,$3,$4) RETURNING *`,
+          [listingId, url, existingCount + idx, !hasPrimary && idx === 0],
+        );
+        rows = insertedImage.rows;
+      } catch (insertErr) {
+        const imageId = crypto.randomUUID();
+        const insertedImage = await query(
+          `INSERT INTO listing_images (id, listing_id, url, sort_order, is_primary)
+           VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+          [imageId, listingId, url, existingCount + idx, !hasPrimary && idx === 0],
+        );
+        rows = insertedImage.rows;
+      }
       inserted.push(rows[0]);
     }
     return inserted;

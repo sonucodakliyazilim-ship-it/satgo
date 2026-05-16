@@ -495,14 +495,17 @@ const createListingWithImages = async (req, res, next) => {
         data: { ...listing, images, primary_image: images[0]?.url || null },
       });
     } catch (uploadErr) {
-      await withTransaction(async (client) => {
-        await client.query('DELETE FROM listings WHERE id = $1', [listing.id]);
-        await client.query(
-          'UPDATE users SET listing_count = GREATEST(listing_count - 1, 0) WHERE id = $1',
-          [req.user.id],
-        );
-      }).catch(() => {});
-      throw uploadErr;
+      console.error('[listing image upload failed]', uploadErr.message);
+      return res.status(201).json({
+        success: true,
+        message: 'Ilan yayina alindi, ancak fotograflar yuklenemedi.',
+        data: {
+          ...listing,
+          images: [],
+          primary_image: null,
+          image_upload_error: uploadErr.message,
+        },
+      });
     }
   } catch (err) {
     req.body = originalBody;

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { categoriesApi, customFieldsApi, hierarchyApi, listingsApi } from '@/lib/api'
+import { categoriesApi, customFieldsApi, hierarchyApi, listingsApi, uploadApi } from '@/lib/api'
 import { defaultCategories } from '@/lib/defaultCategories'
 import { useAuthStore } from '@/lib/store'
 import cities from '@/lib/cities.json'
@@ -658,17 +658,34 @@ export default function CreateListingPage() {
         }
       }
 
-      setSavingLabel('Fotograflar hazirlaniyor...')
-      const preparedFiles = await Promise.all(files.map(compressImageForUpload))
-      const fd = new FormData()
-      fd.append('payload', JSON.stringify(payload))
-      preparedFiles.forEach((file) => fd.append('images', file))
-
-      setSavingLabel('Ilan ve fotograflar yukleniyor...')
-      const { data } = await listingsApi.createWithImages(fd)
+      setSavingLabel('Ilan kaydediliyor...')
+      const { data } = await listingsApi.create(payload)
       const listingId = data.data.id
 
-      toast.success('Ilan fotograflarla olusturuldu')
+      setSavingLabel('Fotograflar yukleniyor...')
+      const preparedFiles = await Promise.all(files.map(compressImageForUpload))
+      let uploadedCount = 0
+      let uploadFailed = false
+
+      for (const file of preparedFiles) {
+        const imageForm = new FormData()
+        imageForm.append('images', file)
+
+        try {
+          const uploadResult = await uploadApi.uploadImages(listingId, imageForm)
+          uploadedCount += uploadResult.data?.data?.length || 0
+        } catch (uploadErr: any) {
+          if (uploadErr?.response?.status === 401) throw uploadErr
+          uploadFailed = true
+        }
+      }
+
+      if (uploadedCount) {
+        toast.success(uploadFailed ? 'Ilan olusturuldu, bazi fotograflar yuklenemedi' : 'Ilan fotograflarla olusturuldu')
+      } else {
+        toast.success('Ilan olusturuldu')
+        toast.error('Fotograflar yuklenemedi; ilan yine de kaydedildi.')
+      }
       router.push(`/ilan/${listingId}`)
     } catch (err: any) {
       if (err?.response?.status === 401) {
