@@ -36,10 +36,11 @@ if (!databaseUrl) {
   );
 }
 
-const requiresSsl =
-  process.env.DB_SSL === 'true' ||
-  process.env.NODE_ENV === 'production' ||
-  /railway|render|neon|supabase|amazonaws/i.test(databaseUrl);
+const sslSetting = String(process.env.DB_SSL || '').trim().toLowerCase();
+const hasExplicitSslSetting = ['true', '1', 'yes', 'false', '0', 'no'].includes(sslSetting);
+const requiresSsl = hasExplicitSslSetting
+  ? ['true', '1', 'yes'].includes(sslSetting)
+  : /railway|render|neon|supabase|amazonaws/i.test(databaseUrl);
 
 const pool = new Pool({
   connectionString: databaseUrl,

@@ -21,6 +21,35 @@ const isPublicAuthPath = (url = '') => {
   return publicAuthPaths.some((path) => url.includes(path))
 }
 
+const getApiPathname = (url = '') => {
+  try {
+    const pathname = new URL(url, API_URL).pathname
+    return pathname.replace(/^\/api(?=\/|$)/, '') || '/'
+  } catch {
+    return url.split('?')[0].replace(/^\/api(?=\/|$)/, '') || '/'
+  }
+}
+
+const isPublicReadPath = (url = '', method = 'get') => {
+  if (!['get', 'head', 'options'].includes(method.toLowerCase())) return false
+
+  const pathname = getApiPathname(url)
+  if (pathname === '/listings/me' || pathname.startsWith('/custom-fields/admin')) return false
+
+  return (
+    pathname === '/listings' ||
+    pathname.startsWith('/listings/') ||
+    pathname === '/categories' ||
+    pathname.startsWith('/categories/') ||
+    pathname === '/banners' ||
+    pathname.startsWith('/banners/') ||
+    pathname === '/custom-fields' ||
+    pathname === '/hierarchy' ||
+    pathname.startsWith('/hierarchy/') ||
+    pathname === '/promotions/packages'
+  )
+}
+
 const decodeJwtPayload = (token?: string) => {
   if (!token || typeof window === 'undefined') return null
 
@@ -42,6 +71,11 @@ const isTokenExpiringSoon = (token?: string) => {
   return payload.exp * 1000 <= Date.now() + TOKEN_REFRESH_BUFFER_MS
 }
 
+const getCurrentAccessToken = () => {
+  const token = getAccessToken()
+  return token && !isTokenExpiringSoon(token) ? token : null
+}
+
 let refreshPromise: Promise<string | null> | null = null
 
 const requestFreshAccessToken = async () => {
@@ -51,7 +85,7 @@ const requestFreshAccessToken = async () => {
     const { data } = await axios.post(
       `${API_URL}/auth/refresh`,
       refreshToken ? { refreshToken } : {},
-      { withCredentials: true },
+      { withCredentials: true, timeout: 15000 },
     )
     const accessToken = data?.data?.accessToken
     if (!accessToken) return null
@@ -80,6 +114,9 @@ export const ensureAccessToken = async () => {
   const token = getAccessToken()
   if (token && !isTokenExpiringSoon(token)) return token
 
+  const refreshToken = getRefreshToken()
+  if (!refreshToken) return token || null
+
   const refreshedToken = await refreshAccessToken()
   return refreshedToken || token || null
 }
@@ -93,6 +130,7 @@ export const api = axios.create({
 
 api.interceptors.request.use(async (config) => {
   const url = config.url || ''
+  const method = config.method || 'get'
 
   if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
     const headers: any = config.headers
@@ -102,7 +140,9 @@ api.interceptors.request.use(async (config) => {
 
   if (isPublicAuthPath(url)) return config
 
-  const token = await ensureAccessToken()
+  const token = isPublicReadPath(url, method)
+    ? getCurrentAccessToken()
+    : await ensureAccessToken()
   if (token) {
     config.headers = config.headers || {}
     config.headers.Authorization = `Bearer ${token}`
@@ -115,7 +155,13 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config as any
-    if (error.response?.status === 401 && original && !original._retry && !isPublicAuthPath(original.url || '')) {
+    if (
+      error.response?.status === 401 &&
+      original &&
+      !original._retry &&
+      !isPublicAuthPath(original.url || '') &&
+      !isPublicReadPath(original.url || '', original.method || 'get')
+    ) {
       original._retry = true
       const token = await refreshAccessToken()
       if (token) {
