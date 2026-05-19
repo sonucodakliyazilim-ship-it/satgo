@@ -92,9 +92,7 @@ type CustomField = {
 
 const MAX_IMAGE_COUNT = 10
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024
-const IMAGE_UPLOAD_EDGE = 1920
-const IMAGE_UPLOAD_QUALITY = 0.75
-const IMAGE_UPLOAD_TIMEOUT_MS = 0
+const IMAGE_UPLOAD_TIMEOUT_MS = 45000
 const IMAGE_UPLOAD_RETRIES = 2
 const IMAGE_UPLOAD_PARALLEL_LIMIT = 5
 const DISPLAYABLE_IMAGE_RE = /\.(jpe?g|png|webp|avif|gif)$/i
@@ -104,45 +102,6 @@ const isDisplayableImageFile = (file: File) => {
   const allowedMimes = ['image/jpeg', 'image/pjpeg', 'image/png', 'image/webp', 'image/avif', 'image/gif']
   if (/\.(heic|heif)$/i.test(file.name) || ['image/heic', 'image/heif'].includes(mime)) return false
   return mime ? allowedMimes.includes(mime) : DISPLAYABLE_IMAGE_RE.test(file.name)
-}
-
-const canvasToBlob = (canvas: HTMLCanvasElement, type: string, quality: number) =>
-  new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, quality))
-
-const compressImageForUpload = async (file: File) => {
-  if (typeof window === 'undefined') return file
-  if (!file.type.startsWith('image/') || file.type === 'image/gif' || /\.gif$/i.test(file.name)) return file
-  if (file.size <= 900 * 1024 && !/\.png$/i.test(file.name)) return file
-
-  try {
-    const bitmap = await createImageBitmap(file)
-    const longestEdge = Math.max(bitmap.width, bitmap.height)
-    const scale = Math.min(1, IMAGE_UPLOAD_EDGE / longestEdge)
-    const width = Math.max(1, Math.round(bitmap.width * scale))
-    const height = Math.max(1, Math.round(bitmap.height * scale))
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-
-    const ctx = canvas.getContext('2d')
-    if (!ctx) {
-      bitmap.close?.()
-      return file
-    }
-
-    ctx.fillStyle = '#fff'
-    ctx.fillRect(0, 0, width, height)
-    ctx.drawImage(bitmap, 0, 0, width, height)
-    bitmap.close?.()
-
-    const blob = await canvasToBlob(canvas, 'image/jpeg', IMAGE_UPLOAD_QUALITY)
-    if (!blob || blob.size >= file.size) return file
-
-    const safeName = file.name.replace(/\.[^.]+$/, '') || 'satgo-fotograf'
-    return new File([blob], `${safeName}.jpg`, { type: 'image/jpeg', lastModified: Date.now() })
-  } catch {
-    return file
-  }
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -597,9 +556,19 @@ export default function CreateListingPage() {
       toast.error('Ilan yayinlamak icin en az 1 gercek fotograf ekle.')
       return
     }
+    console.log('[upload-ui] submit.start', { fileCount: files.length })
     setSaving(true)
     setUploadProgress(0)
     setSavingLabel('Ilan kaydediliyor...')
+    let finalized = false
+    const finalizeUi = () => {
+      if (finalized) return
+      finalized = true
+      setSaving(false)
+      setSavingLabel('')
+      setUploadProgress(0)
+    }
+
     try {
       const vehicleLabels = [form.vehicle_brand, form.vehicle_model, form.vehicle_series, form.vehicle_package].filter(Boolean)
       const vehiclePath = [selectedVehicleBrand, selectedVehicleModel, selectedVehicleSeries, selectedVehiclePackage]
@@ -719,6 +688,14 @@ export default function CreateListingPage() {
         const last = preparedFiles[preparedFiles.length - 1]?.index ?? first
         setSavingLabel(`${labelPrefix}: ${first + 1}-${last + 1}/${files.length}`)
 
+        console.log('[upload-ui] request.start', {
+          listingId: listing.id,
+          attempt,
+          batchSize: preparedFiles.length,
+          firstIndex: first,
+          lastIndex: last,
+        })
+
         const formData = new FormData()
         preparedFiles.forEach(({ file }) => {
           formData.append('images', file, file.name || 'satgo-fotograf.jpg')
@@ -739,12 +716,19 @@ export default function CreateListingPage() {
               updateParallelProgress()
             },
           })
+          console.log('[upload-ui] request.end', {
+            listingId: listing.id,
+            attempt,
+            status: data?.success ? 'ok' : 'error',
+            inserted: Array.isArray(data?.data) ? data.data.length : null,
+          })
           preparedFiles.forEach(({ index }) => {
             fileProgress[index] = 1
           })
           updateParallelProgress()
           return data.data || []
         } catch (uploadErr: any) {
+          console.error('[upload-ui] request.error', { listingId: listing.id, attempt, message: uploadErr?.message || uploadErr, uploadErr })
           if (attempt < IMAGE_UPLOAD_RETRIES && isRetriableUploadError(uploadErr)) {
             await sleep(900 * (attempt + 1))
             return uploadPreparedBatch(preparedFiles, attempt + 1)
@@ -761,28 +745,29 @@ export default function CreateListingPage() {
         const batch = files.slice(offset, offset + IMAGE_UPLOAD_PARALLEL_LIMIT)
         setSavingLabel(`Fotoğraflar hazırlanıyor: ${offset + 1}-${Math.min(offset + batch.length, files.length)}/${files.length}`)
 
-        const preparedResults = await Promise.all(batch.map(async (file, batchIndex) => {
+        const preparedResults: Array<{ file: File; index: number; originalName: string } | null> = []
+        for (let batchIndex = 0; batchIndex < batch.length; batchIndex += 1) {
+          const file = batch[batchIndex]
           const index = offset + batchIndex
           try {
-            fileProgress[index] = Math.max(fileProgress[index], 0.05)
+            fileProgress[index] = Math.max(fileProgress[index], 0.08)
             updateParallelProgress()
 
-            const prepared = await compressImageForUpload(file)
-            fileProgress[index] = Math.max(fileProgress[index], 0.2)
+            fileProgress[index] = Math.max(fileProgress[index], 0.15)
             updateParallelProgress()
 
-            if (prepared.size > MAX_IMAGE_BYTES) {
+            if (file.size > MAX_IMAGE_BYTES) {
               throw new Error('Fotoğraf boyutu en fazla 15 MB olabilir.')
             }
 
-            return { file: prepared, index, originalName: file.name }
+            preparedResults.push({ file, index, originalName: file.name })
           } catch (uploadErr: any) {
             failedUploads.push(`${file.name}: ${getUploadErrorMessage(uploadErr)}`)
             fileProgress[index] = 1
             updateParallelProgress()
-            return null
+            preparedResults.push(null)
           }
-        }))
+        }
 
         const preparedBatch = preparedResults.filter(Boolean) as Array<{ file: File; index: number; originalName: string }>
         if (!preparedBatch.length) continue
@@ -809,20 +794,24 @@ export default function CreateListingPage() {
       } else {
         toast.success(`${uploadedImages.length} fotoğrafla ilan oluşturuldu`)
       }
-      router.push(`/ilan/${listing.id}`)
+      const targetUrl = `/ilan/${listing.id}`
+      setSavingLabel('İlan açılıyor...')
+      setUploadProgress(100)
+      finalizeUi()
+      router.push(targetUrl)
+      return
     } catch (err: any) {
       if (err?.response?.status === 401) {
         setUser(null)
         toast.error('Oturum süresi doldu. Lütfen tekrar giriş yap.')
+        finalizeUi()
         router.push('/giris')
         return
       }
 
       toast.error(err?.response?.data?.message || err?.message || 'İlan oluşturulamadı.')
     } finally {
-      setSaving(false)
-      setSavingLabel('')
-      setUploadProgress(0)
+      finalizeUi()
     }
   }
 

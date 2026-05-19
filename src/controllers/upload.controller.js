@@ -534,6 +534,22 @@ const insertListingImages = async ({ listingId, files, user }) => {
 
 const uploadListingImages = async (req, res, next) => {
   const requestStart = Date.now();
+  res.on('finish', () => {
+    uploadLog('response.finish', {
+      listingId: req.params.listingId,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - requestStart,
+      event: 'finish',
+    });
+  });
+  res.on('close', () => {
+    uploadLog('response.close', {
+      listingId: req.params.listingId,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - requestStart,
+      event: 'close',
+    });
+  });
   uploadLog('request.start', { listingId: req.params.listingId, fileCount: (req.files || []).length, userId: req.user?.id });
   try {
     const inserted = await insertListingImages({
@@ -543,6 +559,7 @@ const uploadListingImages = async (req, res, next) => {
     });
 
     uploadLog('request.end', { listingId: req.params.listingId, inserted: inserted.length, durationMs: Date.now() - requestStart });
+    uploadLog('response.send', { listingId: req.params.listingId, inserted: inserted.length, statusCode: 200 });
 
     res.json({ success: true, message: `${inserted.length} fotoğraf yüklendi.`, data: inserted });
   } catch (err) {
