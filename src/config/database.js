@@ -62,18 +62,34 @@ const compactSql = (text) =>
     : String(text || '').slice(0, 700);
 let queryCounter = 0;
 
+const sanitizeParam = (item) => {
+  if (Buffer.isBuffer(item)) return `<Buffer ${item.length} bytes>`;
+  if (item instanceof Uint8Array) return `<Uint8Array ${item.byteLength} bytes>`;
+  if (Array.isArray(item)) return item.map(sanitizeParam);
+  if (item && typeof item === 'object') {
+    try {
+      return JSON.stringify(item).slice(0, 300);
+    } catch {
+      return '<Object>';
+    }
+  }
+  return item == null ? item : String(item).slice(0, 300);
+};
+
+const sanitizeParams = (params) => (Array.isArray(params) ? params.map(sanitizeParam) : params);
+
 const logQueryError = (err, text, params) => {
   if (err?.code === '42601' || /syntax error/i.test(err?.message || '')) {
     console.error('[db syntax error]', err.message);
     console.error('[db syntax sql]', compactSql(text));
-    if (Array.isArray(params)) console.error('[db syntax params]', params.map((item) => (item == null ? item : String(item).slice(0, 80))));
+    if (Array.isArray(params)) console.error('[db syntax params]', sanitizeParams(params));
   }
 };
 
 const query = async (text, params) => {
   const queryId = ++queryCounter;
   const startTime = Date.now();
-  console.log('[db.query.start]', queryId, compactSql(text), params);
+  console.log('[db.query.start]', queryId, compactSql(text), sanitizeParams(params));
   try {
     return await pool.query(text, params);
   } catch (err) {
@@ -93,7 +109,7 @@ const withTransaction = async (callback) => {
   client.query = async (text, params) => {
     const queryId = ++queryCounter;
     const startTime = Date.now();
-    console.log('[db.client.query.start]', queryId, compactSql(text), params);
+    console.log('[db.client.query.start]', queryId, compactSql(text), sanitizeParams(params));
     try {
       return await originalQuery(text, params);
     } catch (err) {

@@ -707,35 +707,51 @@ export default function CreateListingPage() {
         setUploadProgress(Math.max(1, Math.min(99, Math.round((total / files.length) * 100))))
       }
 
-      const uploadPreparedFile = async (file: File, index: number, attempt = 0): Promise<any[]> => {
+      const uploadPreparedBatch = async (
+        preparedFiles: Array<{ file: File; index: number }>,
+        attempt = 0,
+      ): Promise<any[]> => {
         const totalAttempts = IMAGE_UPLOAD_RETRIES + 1
         const labelPrefix = attempt
           ? `Fotoğraf tekrar yükleniyor (${attempt + 1}/${totalAttempts})`
-          : 'Fotoğraf yükleniyor'
-        setSavingLabel(`${labelPrefix}: ${index + 1}/${files.length}`)
+          : 'Fotoğraflar yükleniyor'
+        const first = preparedFiles[0]?.index ?? 0
+        const last = preparedFiles[preparedFiles.length - 1]?.index ?? first
+        setSavingLabel(`${labelPrefix}: ${first + 1}-${last + 1}/${files.length}`)
 
         const formData = new FormData()
-        formData.append('images', file, file.name || 'satgo-fotograf.jpg')
+        preparedFiles.forEach(({ file }) => {
+          formData.append('images', file, file.name || 'satgo-fotograf.jpg')
+        })
 
         try {
           const { data } = await uploadApi.uploadImages(listing.id, formData, {
             timeout: IMAGE_UPLOAD_TIMEOUT_MS,
             onUploadProgress: (event: any) => {
               if (!event.total) return
-              const currentFileProgress = event.loaded / event.total
-              fileProgress[index] = Math.max(fileProgress[index], 0.2 + currentFileProgress * 0.75)
+              const currentBatchProgress = event.loaded / event.total
+              preparedFiles.forEach(({ index }) => {
+                fileProgress[index] = Math.max(fileProgress[index], 0.2 + currentBatchProgress * 0.7)
+              })
+              if (event.loaded >= event.total) {
+                setSavingLabel('Fotoğraflar sunucuda işleniyor...')
+              }
               updateParallelProgress()
             },
           })
-          fileProgress[index] = 1
+          preparedFiles.forEach(({ index }) => {
+            fileProgress[index] = 1
+          })
           updateParallelProgress()
           return data.data || []
         } catch (uploadErr: any) {
           if (attempt < IMAGE_UPLOAD_RETRIES && isRetriableUploadError(uploadErr)) {
             await sleep(900 * (attempt + 1))
-            return uploadPreparedFile(file, index, attempt + 1)
+            return uploadPreparedBatch(preparedFiles, attempt + 1)
           }
-          fileProgress[index] = 1
+          preparedFiles.forEach(({ index }) => {
+            fileProgress[index] = 1
+          })
           updateParallelProgress()
           throw uploadErr
         }
@@ -745,7 +761,7 @@ export default function CreateListingPage() {
         const batch = files.slice(offset, offset + IMAGE_UPLOAD_PARALLEL_LIMIT)
         setSavingLabel(`Fotoğraflar hazırlanıyor: ${offset + 1}-${Math.min(offset + batch.length, files.length)}/${files.length}`)
 
-        await Promise.all(batch.map(async (file, batchIndex) => {
+        const preparedResults = await Promise.all(batch.map(async (file, batchIndex) => {
           const index = offset + batchIndex
           try {
             fileProgress[index] = Math.max(fileProgress[index], 0.05)
@@ -759,14 +775,28 @@ export default function CreateListingPage() {
               throw new Error('Fotoğraf boyutu en fazla 15 MB olabilir.')
             }
 
-            const rows = await uploadPreparedFile(prepared, index)
-            uploadedImages.push(...rows)
+            return { file: prepared, index, originalName: file.name }
           } catch (uploadErr: any) {
             failedUploads.push(`${file.name}: ${getUploadErrorMessage(uploadErr)}`)
             fileProgress[index] = 1
             updateParallelProgress()
+            return null
           }
         }))
+
+        const preparedBatch = preparedResults.filter(Boolean) as Array<{ file: File; index: number; originalName: string }>
+        if (!preparedBatch.length) continue
+
+        try {
+          const rows = await uploadPreparedBatch(preparedBatch.map(({ file, index }) => ({ file, index })))
+          uploadedImages.push(...rows)
+        } catch (uploadErr: any) {
+          preparedBatch.forEach(({ index, originalName }) => {
+            failedUploads.push(`${originalName}: ${getUploadErrorMessage(uploadErr)}`)
+            fileProgress[index] = 1
+          })
+          updateParallelProgress()
+        }
       }
 
       setUploadProgress(100)
