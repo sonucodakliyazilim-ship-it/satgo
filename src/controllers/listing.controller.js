@@ -95,7 +95,7 @@ const selectListingCards = async ({ where, order, params, orderParams = [], limi
     `SELECT l.*,
             c.name AS category_name, c.slug AS category_slug, c.icon AS category_icon,
             u.name AS seller_name, NULL AS seller_avatar, u.rating_avg AS seller_rating,
-            (SELECT url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS primary_image
+            (SELECT image_url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS primary_image
      FROM listings l
      JOIN categories c ON c.id = l.category_id
      JOIN users u ON u.id = l.user_id
@@ -226,7 +226,10 @@ const getListing = async (req, res, next) => {
 
     // Fetch images
     const images = await query(
-      'SELECT * FROM listing_images WHERE listing_id = $1 ORDER BY sort_order',
+      `SELECT id, listing_id, image_url, image_url AS url, is_primary, sort_order, created_at
+       FROM listing_images
+       WHERE listing_id = $1
+       ORDER BY is_primary DESC, sort_order ASC, created_at ASC`,
       [id]
     );
     listing.images = images.rows;
@@ -246,34 +249,31 @@ const getListing = async (req, res, next) => {
     await ensureCustomFieldTables();
     const customFieldRows = await query(
       `SELECT f.id,
-              f.field_key,
+              f."key",
               f.label,
-              f.field_type,
+              f."type",
               f.sort_order,
-              lcf.value_text,
-              lcf.value_number,
-              lcf.value_bool,
+              lfv.value,
               o.label AS option_label
-       FROM listing_custom_fields lcf
-       JOIN custom_fields f ON f.id = lcf.field_id
+       FROM listing_field_values lfv
+       JOIN custom_fields f ON f.id = lfv.field_id
        LEFT JOIN custom_field_options o
          ON o.field_id = f.id
-        AND o.value = lcf.value_text
-        AND o.is_active = TRUE
-       WHERE lcf.listing_id = $1
+        AND o.value = lfv.value
+       WHERE lfv.listing_id = $1
          AND f.is_active = TRUE
       ORDER BY f.sort_order, f.label`,
       [id],
     );
 
     for (const field of customFieldRows.rows) {
-      if (field.field_type !== 'multi_select' || !field.value_text) continue;
+      if (field.type !== 'multi_select' || !field.value) continue;
       let selectedValues = [];
       try {
-        const parsed = JSON.parse(field.value_text);
+        const parsed = JSON.parse(field.value);
         selectedValues = Array.isArray(parsed) ? parsed.map(String) : [];
       } catch {
-        selectedValues = String(field.value_text).split(',').map((item) => item.trim()).filter(Boolean);
+        selectedValues = String(field.value).split(',').map((item) => item.trim()).filter(Boolean);
       }
       if (!selectedValues.length) continue;
 
@@ -282,7 +282,7 @@ const getListing = async (req, res, next) => {
          FROM custom_field_options
          WHERE field_id = $1
            AND value = ANY($2::text[])
-           AND is_active = TRUE`,
+        `,
         [field.id, selectedValues],
       );
       const byValue = new Map(optionLabels.rows.map((option) => [option.value, option.label]));
@@ -291,17 +291,18 @@ const getListing = async (req, res, next) => {
 
     listing.custom_fields = customFieldRows.rows.map((field) => ({
       id: field.id,
-      field_key: field.field_key,
+      field_id: field.id,
+      key: field.key,
+      field_key: field.key,
       label: field.label,
-      field_type: field.field_type,
+      type: field.type,
+      field_type: field.type,
       value:
-        field.field_type === 'number'
-          ? field.value_number
-          : field.field_type === 'checkbox' || field.field_type === 'boolean'
-            ? field.value_bool
-            : field.field_type === 'multi_select'
-              ? field.multi_option_label || field.value_text
-              : field.option_label || field.value_text,
+        field.type === 'checkbox'
+          ? field.value === 'true'
+          : field.type === 'multi_select'
+            ? field.multi_option_label || field.value
+            : field.option_label || field.value,
     }));
 
     // Increment view count only for visitors, not the listing owner.
@@ -326,7 +327,12 @@ const getListing = async (req, res, next) => {
 
 // POST /api/listings
 const createListing = async (req, res, next) => {
+  const startTime = Date.now();
+  const logMsg = (stage, extra = {}) => {
+    console.log(`[createListing-${stage}] ${Date.now() - startTime}ms`, extra);
+  };
   try {
+    logMsg('start', { userId: req.user.id, title: req.body.title });
     const {
       category_id, sub_category_id, title, description, price, price_negotiable,
       condition, city, district, neighborhood, latitude, longitude,
@@ -338,6 +344,10 @@ const createListing = async (req, res, next) => {
     const cleanHierarchyPath = cleanStringArray(hierarchy_path);
     const cleanHierarchyLabels = cleanStringArray(hierarchy_labels);
     const cleanHierarchyGroup = hierarchy_group ? String(hierarchy_group).trim() : null;
+    const effectiveCategoryId = Number(sub_category_id || category_id);
+    const compatibilitySubCategoryId = sub_category_id && Number(sub_category_id) !== Number(category_id)
+      ? Number(sub_category_id)
+      : null;
     const hasCustomFields = Array.isArray(custom_fields) && custom_fields.length > 0;
     let canSaveCustomFields = hasCustomFields;
     if (hasCustomFields) {
@@ -349,7 +359,9 @@ const createListing = async (req, res, next) => {
       }
     }
 
+    logMsg('pre-tx');
     const result = await withTransaction(async (client) => {
+      logMsg('tx-start');
       // Create listing
       const { rows } = await client.query(
         `INSERT INTO listings
@@ -359,7 +371,7 @@ const createListing = async (req, res, next) => {
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'active',NOW())
          RETURNING *`,
         [
-          req.user.id, category_id, sub_category_id || null,
+          req.user.id, effectiveCategoryId, compatibilitySubCategoryId,
           title, description || null, price || null,
           price_negotiable || false, condition || 'good',
           city || null, district || null, neighborhood || null,
@@ -425,10 +437,12 @@ const createListing = async (req, res, next) => {
       }
 
       // Update user listing count
+      logMsg('update-user');
       await client.query(
         'UPDATE users SET listing_count = listing_count + 1 WHERE id = $1',
         [req.user.id]
       );
+      logMsg('tx-done');
 
       return listing;
     });
@@ -438,7 +452,9 @@ const createListing = async (req, res, next) => {
       message: 'İlanınız yayına alındı.',
       data: result,
     });
+    logMsg('response-sent');
   } catch (err) {
+    logMsg('error', { msg: err.message });
     next(err);
   }
 };
@@ -455,12 +471,9 @@ const createListingWithImages = async (req, res, next) => {
   const originalBody = req.body;
   try {
     const payload = parseListingPayload(req.body);
-    if (!req.files || req.files.length === 0) {
-      return res.status(422).json({ success: false, message: 'Ilan yayinlamak icin en az 1 fotograf yukleyin.' });
-    }
-
     let responseCode = 201;
     let responseBody = null;
+    let createError = null;
     req.body = payload;
 
     await createListing(
@@ -476,15 +489,23 @@ const createListingWithImages = async (req, res, next) => {
         },
       },
       (err) => {
-        if (err) throw err;
+        createError = err;
       },
     );
 
-    req.body = originalBody;
+    if (createError) throw createError;
 
     const listing = responseBody?.data;
     if (!responseBody?.success || !listing?.id) {
       return res.status(responseCode).json(responseBody || { success: false, message: 'Ilan olusturulamadi.' });
+    }
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(201).json({
+        success: true,
+        message: 'Ilan kaydedildi. Fotograf yuklenmedi.',
+        data: { ...listing, images: [], primary_image: null },
+      });
     }
 
     try {
@@ -498,18 +519,19 @@ const createListingWithImages = async (req, res, next) => {
       console.error('[listing image upload failed]', uploadErr.message);
       return res.status(201).json({
         success: true,
-        message: 'Ilan yayina alindi, ancak fotograflar yuklenemedi.',
+        message: 'Ilan kaydedildi fakat fotograflar yuklenemedi. Ilan silinmedi.',
         data: {
           ...listing,
           images: [],
           primary_image: null,
-          image_upload_error: uploadErr.message,
+          image_upload_error: uploadErr.message || 'Fotograflar yuklenemedi.',
         },
       });
     }
   } catch (err) {
-    req.body = originalBody;
     next(err);
+  } finally {
+    req.body = originalBody;
   }
 };
 
@@ -660,7 +682,7 @@ const getMyListings = async (req, res, next) => {
 
     const { rows } = await query(
       `SELECT l.*, c.name AS category_name, c.icon AS category_icon,
-              (SELECT url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS primary_image
+              (SELECT image_url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS primary_image
        FROM listings l
        JOIN categories c ON c.id = l.category_id
        WHERE ${conds.join(' AND ')}
@@ -734,7 +756,7 @@ const getUserListings = async (req, res, next) => {
 
     const { rows } = await query(
       `SELECT l.*, c.name AS category_name, c.icon AS category_icon,
-              (SELECT url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS primary_image
+              (SELECT image_url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS primary_image
        FROM listings l JOIN categories c ON c.id = l.category_id
        WHERE l.user_id = $1 AND l.status = $2
        ORDER BY l.created_at DESC

@@ -5,27 +5,31 @@ import toast from 'react-hot-toast'
 import { categoriesApi, customFieldsApi } from '@/lib/api'
 import { PlusCircle, Save, Trash2 } from 'lucide-react'
 
+type FieldType = 'text' | 'number' | 'select' | 'radio' | 'checkbox' | 'multi_select' | 'textarea'
+
 type CustomField = {
   id: string
   category_id: number
-  sub_category_id?: number | null
-  field_key: string
+  key?: string
+  field_key?: string
   label: string
-  field_type: 'input' | 'text' | 'number' | 'select' | 'checkbox' | 'boolean' | 'textarea' | 'radio' | 'multi_select'
-  is_required: boolean
+  type?: FieldType
+  field_type?: FieldType
+  required?: boolean
+  is_required?: boolean
   sort_order: number
   is_active: boolean
-  options?: Array<{ id?: string; value: string; label: string; sort_order?: number; is_active?: boolean }>
+  category_name?: string
+  options?: Array<{ id?: string; value: string; label: string; sort_order?: number }>
 }
 
 const emptyForm = {
   id: '',
   category_id: '',
-  sub_category_id: '',
-  field_key: '',
+  key: '',
   label: '',
-  field_type: 'input',
-  is_required: 'false',
+  type: 'text' as FieldType,
+  required: 'false',
   sort_order: '0',
   is_active: 'true',
   optionsText: '',
@@ -35,68 +39,49 @@ const slugifyKey = (value: string) =>
   value
     .trim()
     .toLocaleLowerCase('tr-TR')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ı/g, 'i')
     .replace(/ğ/g, 'g')
     .replace(/ü/g, 'u')
     .replace(/ş/g, 's')
-    .replace(/ı/g, 'i')
     .replace(/ö/g, 'o')
     .replace(/ç/g, 'c')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
 
-const flattenCategories = (items: any[] = [], depth = 0, parent?: any): any[] =>
-  items.flatMap((item) => [
-    { ...item, depth, parent },
-    ...flattenCategories(item.sub_categories || [], depth + 1, item),
-  ])
-
-const rootIdOf = (category: any): string => {
-  let current = category
-  while (current?.parent) current = current.parent
-  return String(current?.id || category?.id || '')
-}
-
-const fullCategoryName = (category: any): string => {
-  const names = []
-  let current = category
-  while (current) {
-    names.unshift(current.name)
-    current = current.parent
-  }
-  return names.join(' / ')
-}
+const flattenCategories = (items: any[] = [], depth = 0, trail = ''): any[] =>
+  items.flatMap((item) => {
+    const label = trail ? `${trail} / ${item.name}` : item.name
+    return [
+      { ...item, depth, label },
+      ...flattenCategories(item.sub_categories || [], depth + 1, label),
+    ]
+  })
 
 const typeLabel = (type: string) =>
   ({
-    input: 'Kısa yazı',
     text: 'Kısa yazı',
     number: 'Sayı',
     select: 'Seçenek listesi',
     checkbox: 'Onay kutusu',
-    boolean: 'Onay kutusu',
     textarea: 'Uzun metin',
     radio: 'Tek seçim',
     multi_select: 'Çoklu seçim',
   })[type] || type
 
-const parseOptionsText = (text: string) => {
-  return String(text || '')
+const parseOptionsText = (text: string) =>
+  String(text || '')
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line, index) => {
-      // formats:
-      // value
-      // value|label
       const [valueRaw, labelRaw] = line.split('|')
-      const value = (valueRaw || '').trim()
       const label = (labelRaw || valueRaw || '').trim()
-      return { value, label, sort_order: index * 10, is_active: true }
+      const value = (valueRaw || label).trim()
+      return { value, label, sort_order: index * 10 }
     })
-    .filter((o) => o.value && o.label)
-}
+    .filter((option) => option.value && option.label)
 
 export default function CustomFieldsManager() {
   const [categories, setCategories] = useState<any[]>([])
@@ -108,11 +93,14 @@ export default function CustomFieldsManager() {
   const load = async () => {
     setLoading(true)
     try {
-      const [c, f] = await Promise.all([categoriesApi.getAll({ include_inactive: true }), customFieldsApi.adminList()])
-      setCategories(c.data.data || [])
-      setFields(f.data.data || [])
+      const [categoryResponse, fieldResponse] = await Promise.all([
+        categoriesApi.getAll({ include_inactive: true }),
+        customFieldsApi.adminList(),
+      ])
+      setCategories(categoryResponse.data.data || [])
+      setFields(fieldResponse.data.data || [])
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Custom field listesi alınamadı')
+      toast.error(err?.response?.data?.message || 'Alan listesi alınamadı')
     } finally {
       setLoading(false)
     }
@@ -122,14 +110,8 @@ export default function CustomFieldsManager() {
     load()
   }, [])
 
+  const categoryOptions = useMemo(() => flattenCategories(categories || []), [categories])
   const reset = () => setForm(emptyForm)
-
-  const categoryOptions = useMemo(() => {
-    const all = flattenCategories(categories || [])
-    const roots = all.filter((category: any) => !category.parent_id)
-    const subs = all.filter((category: any) => category.parent_id)
-    return { roots, subs, all }
-  }, [categories])
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -138,15 +120,14 @@ export default function CustomFieldsManager() {
       const payload: any = {
         ...(form.id ? { id: form.id } : {}),
         category_id: Number(form.category_id),
-        sub_category_id: form.sub_category_id ? Number(form.sub_category_id) : null,
-        field_key: slugifyKey(form.field_key || form.label),
+        key: slugifyKey(form.key || form.label),
         label: String(form.label || '').trim(),
-        field_type: form.field_type,
-        is_required: form.is_required === 'true',
+        type: form.type,
+        required: form.required === 'true',
         sort_order: Number(form.sort_order || 0),
         is_active: form.is_active === 'true',
       }
-      if (['select', 'radio', 'multi_select'].includes(form.field_type)) {
+      if (['select', 'radio', 'multi_select'].includes(form.type)) {
         payload.options = parseOptionsText(form.optionsText)
       }
       await customFieldsApi.adminUpsert(payload)
@@ -160,18 +141,20 @@ export default function CustomFieldsManager() {
     }
   }
 
-  const edit = (field: any) => {
+  const edit = (field: CustomField) => {
+    const type = (field.type || field.field_type || 'text') as FieldType
     setForm({
       id: field.id,
       category_id: String(field.category_id || ''),
-      sub_category_id: field.sub_category_id ? String(field.sub_category_id) : '',
-      field_key: field.field_key || '',
+      key: field.key || field.field_key || '',
       label: field.label || '',
-      field_type: field.field_type === 'text' ? 'input' : field.field_type === 'boolean' ? 'checkbox' : field.field_type || 'input',
-      is_required: field.is_required ? 'true' : 'false',
+      type,
+      required: field.required || field.is_required ? 'true' : 'false',
       sort_order: String(field.sort_order ?? 0),
-      is_active: field.is_active ? 'true' : 'false',
-      optionsText: Array.isArray(field.options) ? field.options.map((o: any) => (o.label && o.label !== o.value ? `${o.value}|${o.label}` : o.value)).join('\n') : '',
+      is_active: field.is_active === false ? 'false' : 'true',
+      optionsText: Array.isArray(field.options)
+        ? field.options.map((option) => (option.label && option.label !== option.value ? `${option.value}|${option.label}` : option.value)).join('\n')
+        : '',
     })
   }
 
@@ -189,30 +172,21 @@ export default function CustomFieldsManager() {
 
   return (
     <section className="card overflow-hidden border-2 border-brand/20">
-      <div className="p-4 border-b border-gray-100">
+      <div className="border-b border-gray-100 p-4">
         <h2 className="font-black">Alan Yönetimi</h2>
-        <p className="text-sm text-gray-500 mt-1">Kategori seçilince ilan verme formunda otomatik açılacak alanları buradan ekle.</p>
+        <p className="mt-1 text-sm text-gray-500">Seçilen kategoriye bağlı ilan alanlarını yönetin.</p>
       </div>
 
-      <form onSubmit={save} className="p-4 grid gap-3 lg:grid-cols-[1fr_1fr_1fr_160px_120px_120px_auto] lg:items-end border-b border-gray-100">
+      <form onSubmit={save} className="grid gap-3 border-b border-gray-100 p-4 lg:grid-cols-[1.2fr_1fr_1fr_150px_120px_110px_auto] lg:items-end">
         <div>
           <label className="label">Kategori *</label>
-          <select value={form.category_id} onChange={(e) => setForm((f: any) => ({ ...f, category_id: e.target.value, sub_category_id: '' }))} className="input" required>
+          <select value={form.category_id} onChange={(e) => setForm((current: any) => ({ ...current, category_id: e.target.value }))} className="input" required>
             <option value="">Seç</option>
-            {categoryOptions.roots.map((c: any) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
+            {categoryOptions.map((category: any) => (
+              <option key={category.id} value={category.id}>
+                {'- '.repeat(category.depth)}{category.name}
+              </option>
             ))}
-          </select>
-        </div>
-        <div>
-          <label className="label">Alt kategori (opsiyonel)</label>
-          <select value={form.sub_category_id} onChange={(e) => setForm((f: any) => ({ ...f, sub_category_id: e.target.value }))} className="input" disabled={!form.category_id}>
-            <option value="">Yok</option>
-            {categoryOptions.subs
-              .filter((s: any) => rootIdOf(s) === String(form.category_id))
-              .map((s: any) => (
-                <option key={s.id} value={s.id}>{fullCategoryName(s)}</option>
-              ))}
           </select>
         </div>
         <div>
@@ -220,13 +194,10 @@ export default function CustomFieldsManager() {
           <input
             value={form.label}
             onChange={(e) =>
-              setForm((f: any) => ({
-                ...f,
+              setForm((current: any) => ({
+                ...current,
                 label: e.target.value,
-                field_key:
-                  !f.id && (!f.field_key || f.field_key === slugifyKey(f.label))
-                    ? slugifyKey(e.target.value)
-                    : f.field_key,
+                key: !current.id && (!current.key || current.key === slugifyKey(current.label)) ? slugifyKey(e.target.value) : current.key,
               }))
             }
             className="input"
@@ -236,12 +207,12 @@ export default function CustomFieldsManager() {
         </div>
         <div>
           <label className="label">Teknik anahtar</label>
-          <input value={form.field_key} onChange={(e) => setForm((f: any) => ({ ...f, field_key: e.target.value }))} className="input" placeholder="Otomatik oluşur" />
+          <input value={form.key} onChange={(e) => setForm((current: any) => ({ ...current, key: e.target.value }))} className="input" placeholder="Otomatik oluşur" />
         </div>
         <div>
           <label className="label">Tip</label>
-          <select value={form.field_type} onChange={(e) => setForm((f: any) => ({ ...f, field_type: e.target.value }))} className="input">
-            <option value="input">Kısa yazı</option>
+          <select value={form.type} onChange={(e) => setForm((current: any) => ({ ...current, type: e.target.value }))} className="input">
+            <option value="text">Kısa yazı</option>
             <option value="number">Sayı</option>
             <option value="select">Seçenek listesi</option>
             <option value="radio">Tek seçim</option>
@@ -252,14 +223,14 @@ export default function CustomFieldsManager() {
         </div>
         <div>
           <label className="label">Zorunlu</label>
-          <select value={form.is_required} onChange={(e) => setForm((f: any) => ({ ...f, is_required: e.target.value }))} className="input">
+          <select value={form.required} onChange={(e) => setForm((current: any) => ({ ...current, required: e.target.value }))} className="input">
             <option value="false">Hayır</option>
             <option value="true">Evet</option>
           </select>
         </div>
         <div>
           <label className="label">Sıra</label>
-          <input type="number" value={form.sort_order} onChange={(e) => setForm((f: any) => ({ ...f, sort_order: e.target.value }))} className="input" />
+          <input type="number" value={form.sort_order} onChange={(e) => setForm((current: any) => ({ ...current, sort_order: e.target.value }))} className="input" />
         </div>
         <div className="flex gap-2">
           <button disabled={saving} className="btn-brand flex items-center gap-2 whitespace-nowrap">
@@ -271,22 +242,22 @@ export default function CustomFieldsManager() {
           </button>
         </div>
 
-        {['select', 'radio', 'multi_select'].includes(form.field_type) && (
-          <div className="lg:col-span-8">
-            <label className="label">Seçenekler (her satıra bir seçenek)</label>
+        {['select', 'radio', 'multi_select'].includes(form.type) && (
+          <div className="lg:col-span-7">
+            <label className="label">Seçenekler</label>
             <textarea
               value={form.optionsText}
-              onChange={(e) => setForm((f: any) => ({ ...f, optionsText: e.target.value }))}
+              onChange={(e) => setForm((current: any) => ({ ...current, optionsText: e.target.value }))}
               rows={4}
               className="input resize-none font-mono text-xs"
-              placeholder={'Kırmızı\nMavi\nSiyah'}
+              placeholder={'kirmizi|Kırmızı\nmavi|Mavi\nsiyah|Siyah'}
             />
           </div>
         )}
       </form>
 
-      <div className="p-4 flex items-center gap-2 text-sm font-semibold text-gray-500">
-        <PlusCircle className="w-4 h-4 text-brand" />
+      <div className="flex items-center gap-2 p-4 text-sm font-semibold text-gray-500">
+        <PlusCircle className="h-4 w-4 text-brand" />
         Toplam: {fields.length.toLocaleString('tr-TR')} alan
       </div>
 
@@ -294,39 +265,41 @@ export default function CustomFieldsManager() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-500">
             <tr>
-              <th className="text-left p-3">Alan</th>
-              <th className="text-left p-3">Kategori</th>
-              <th className="text-left p-3">Tip</th>
-              <th className="text-left p-3">Zorunlu</th>
-              <th className="text-left p-3">Sıra</th>
-              <th className="text-right p-3">İşlem</th>
+              <th className="p-3 text-left">Alan</th>
+              <th className="p-3 text-left">Kategori</th>
+              <th className="p-3 text-left">Tip</th>
+              <th className="p-3 text-left">Zorunlu</th>
+              <th className="p-3 text-left">Sıra</th>
+              <th className="p-3 text-right">İşlem</th>
             </tr>
           </thead>
           <tbody>
-            {fields.map((f) => (
-              <tr key={f.id} className="border-t border-gray-50">
-                <td className="p-3">
-                  <p className="font-black">{f.label}</p>
-                  <p className="text-xs font-mono text-gray-500">{f.field_key}{f.sub_category_id ? ` (sub:${f.sub_category_id})` : ''}</p>
-                </td>
-                <td className="p-3 text-gray-700">
-                  {String((f as any).category_name || f.category_id)}
-                  {(f as any).sub_category_name ? <span className="text-gray-400"> / {(f as any).sub_category_name}</span> : null}
-                </td>
-                <td className="p-3">{typeLabel(f.field_type)}</td>
-                <td className="p-3">{f.is_required ? 'Evet' : 'Hayır'}</td>
-                <td className="p-3">{f.sort_order ?? 0}</td>
-                <td className="p-3">
-                  <div className="flex justify-end gap-2">
-                    <button type="button" onClick={() => edit(f)} className="btn-outline px-3 py-1.5 text-xs">Düzenle</button>
-                    <button type="button" onClick={() => remove(f.id)} className="btn-outline flex items-center gap-1 px-3 py-1.5 text-xs text-red-500">
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Sil
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {fields.map((field) => {
+              const fieldKey = field.key || field.field_key || ''
+              const fieldType = field.type || field.field_type || 'text'
+              const required = field.required || field.is_required
+              return (
+                <tr key={field.id} className="border-t border-gray-50">
+                  <td className="p-3">
+                    <p className="font-black">{field.label}</p>
+                    <p className="font-mono text-xs text-gray-500">{fieldKey}</p>
+                  </td>
+                  <td className="p-3 text-gray-700">{field.category_name || field.category_id}</td>
+                  <td className="p-3">{typeLabel(fieldType)}</td>
+                  <td className="p-3">{required ? 'Evet' : 'Hayır'}</td>
+                  <td className="p-3">{field.sort_order ?? 0}</td>
+                  <td className="p-3">
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={() => edit(field)} className="btn-outline px-3 py-1.5 text-xs">Düzenle</button>
+                      <button type="button" onClick={() => remove(field.id)} className="btn-outline flex items-center gap-1 px-3 py-1.5 text-xs text-red-500">
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Sil
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
             {!loading && !fields.length && (
               <tr>
                 <td colSpan={6} className="p-8 text-center text-gray-400">Henüz alan yok.</td>

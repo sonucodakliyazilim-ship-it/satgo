@@ -41,12 +41,25 @@ const getCookie = (req, name) => {
 };
 
 const getAccessTokenFromRequest = (req) => {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    return authHeader.split(' ')[1];
-  }
+  const sanitize = (t) => {
+    if (!t) return null;
+    let token = String(t).trim();
+    // remove surrounding quotes if present
+    if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+      token = token.slice(1, -1);
+    }
+    // common prefixes
+    if (/^Bearer\s+/i.test(token)) token = token.replace(/^Bearer\s+/i, '');
+    if (/^Token\s+/i.test(token)) token = token.replace(/^Token\s+/i, '');
+    return token.trim();
+  };
 
-  return getCookie(req, ACCESS_TOKEN_COOKIE);
+  const authHeader = req.headers.authorization;
+  const fromHeader = sanitize(authHeader);
+  if (fromHeader) return fromHeader;
+
+  const fromCookie = getCookie(req, ACCESS_TOKEN_COOKIE);
+  return sanitize(fromCookie);
 };
 
 const getRefreshTokenFromRequest = (req) => {

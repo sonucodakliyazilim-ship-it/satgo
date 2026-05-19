@@ -145,7 +145,7 @@ export default function ListingDetailPage() {
 
   const images = listing.images || []
   const img = images[imgIdx]
-  const imgUrl = mediaUrl(img?.url)
+  const imgUrl = mediaUrl(img?.image_url || img?.url)
   const price = Number(listing.price || 0)
   const offerOptions = price > 0
     ? [
@@ -208,7 +208,7 @@ export default function ListingDetailPage() {
             {images.length > 1 && (
               <div className="flex gap-2 p-3 overflow-x-auto">
                 {images.map((im: any, i: number) => {
-                  const tUrl = mediaUrl(im.url)
+                  const tUrl = mediaUrl(im.image_url || im.url)
                   return (
                     <button
                       key={i}

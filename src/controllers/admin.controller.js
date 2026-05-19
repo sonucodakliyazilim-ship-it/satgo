@@ -123,6 +123,28 @@ const setListingStatus = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// DELETE /api/admin/listings/:id
+const deleteListing = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    await withTransaction(async (client) => {
+      const { rows } = await client.query('SELECT user_id FROM listings WHERE id = $1', [id]);
+      if (!rows.length) {
+        const err = new Error('Ilan bulunamadi.');
+        err.status = 404;
+        throw err;
+      }
+
+      await client.query('DELETE FROM listings WHERE id = $1', [id]);
+      await client.query(
+        'UPDATE users SET listing_count = GREATEST(listing_count - 1, 0) WHERE id = $1',
+        [rows[0].user_id],
+      );
+    });
+    res.json({ success: true, message: 'Ilan silindi.' });
+  } catch (err) { next(err); }
+};
+
 // GET /api/admin/reports
 const getReports = async (req, res, next) => {
   try {
@@ -274,7 +296,7 @@ const updatePackage = async (req, res, next) => {
 
 module.exports = {
   getDashboard, getUsers, setUserStatus,
-  getListings, setListingStatus,
+  getListings, setListingStatus, deleteListing,
   getReports, resolveReport,
   getPaymentInfo, updatePaymentInfo,
   getPromotions, getPromotionOrders, approveOrder, rejectOrder,

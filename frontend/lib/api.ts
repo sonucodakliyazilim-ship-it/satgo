@@ -191,7 +191,8 @@ export const listingsApi = {
   getMine: (params?: any) => api.get('/listings/me', { params }),
   getOne: (id: string) => api.get(`/listings/${id}`),
   create: (d: any) => api.post('/listings', d),
-  createWithImages: (d: FormData) => api.post('/listings/with-images', d, { timeout: 120000 }),
+  createWithImages: (d: FormData, config: any = {}) =>
+    api.post('/listings/with-images', d, { timeout: 0, ...config }),
   update: (id: string, d: any) => api.patch(`/listings/${id}`, d),
   setStatus: (id: string, status: string) => api.patch(`/listings/${id}/status`, { status }),
   delete: (id: string) => api.delete(`/listings/${id}`),
@@ -204,6 +205,7 @@ export const adminApi = {
   listings: (params?: any) => api.get('/admin/listings', { params }),
   setListingStatus: (id: string, status: string, rejection_reason?: string) =>
     api.patch(`/admin/listings/${id}/status`, { status, rejection_reason }),
+  deleteListing: (id: string) => api.delete(`/admin/listings/${id}`),
   setUserStatus: (id: string, status: string) => api.patch(`/admin/users/${id}/status`, { status }),
   reports: (params?: any) => api.get('/admin/reports', { params }),
   resolveReport: (id: string, data: any) => api.patch(`/admin/reports/${id}`, data),
@@ -274,8 +276,8 @@ export const promotionsApi = {
 }
 
 export const uploadApi = {
-  uploadImages: (listingId: string, files: FormData) =>
-    api.post(`/upload/listing-images/${listingId}`, files, { timeout: 120000 }),
+  uploadImages: (listingId: string, files: FormData, config: any = {}) =>
+    api.post(`/upload/listing-images/${listingId}`, files, { timeout: 0, ...config }),
   deleteImage: (imageId: string) => api.delete(`/upload/listing-images/${imageId}`),
   setPrimary: (imageId: string) => api.patch(`/upload/listing-images/${imageId}/primary`),
 }

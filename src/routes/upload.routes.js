@@ -1,12 +1,13 @@
 const router = require('express').Router();
 const { authenticate } = require('../middleware/auth.middleware');
-const { upload, uploadListingImages, deleteListingImage, setPrimaryImage } = require('../controllers/upload.controller');
+const { uploadMiddleware, uploadListingImages, getListingImageFile, deleteListingImage, setPrimaryImage } = require('../controllers/upload.controller');
 
+router.get('/listing-images/:imageId/file', getListingImageFile);
 router.use(authenticate);
 
 // POST /api/upload/listing-images/:listingId  — upload images for a listing
 router.post('/listing-images/:listingId',
-  upload.array('images', 10),
+  uploadMiddleware('images', 10),
   uploadListingImages
 );
 

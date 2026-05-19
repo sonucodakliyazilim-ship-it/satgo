@@ -64,6 +64,12 @@ const makeSlug = (value) =>
   String(value || '')
     .trim()
     .toLowerCase()
+    .replace(/ı/g, 'i')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/ğ/g, 'g')
@@ -213,37 +219,41 @@ const getCategories = async (req, res, next) => {
   try {
     preventCategoryCache(res);
     await ensureDefaultCategories();
+    const startTime = Date.now();
     const includeInactive = req.query.include_inactive === 'true' || req.query.includeInactive === 'true';
 
-    const { rows } = await query(
-      `WITH listing_counts AS (
-         SELECT category_id AS category_id, COUNT(*)::int AS count
-         FROM listings
-         WHERE status = 'active' AND category_id IS NOT NULL
-         GROUP BY category_id
-         UNION ALL
-         SELECT sub_category_id AS category_id, COUNT(*)::int AS count
-         FROM listings
-         WHERE status = 'active' AND sub_category_id IS NOT NULL
-         GROUP BY sub_category_id
-       )
-       SELECT c.*, COALESCE(SUM(lc.count), 0)::int AS listing_count
-       FROM categories c
-       LEFT JOIN listing_counts lc ON lc.category_id = c.id
-       WHERE ($1::boolean = TRUE OR c.is_active = TRUE)
-       GROUP BY c.id
-       ORDER BY c.parent_id NULLS FIRST, c.sort_order, c.name`,
+    // Fast: count active listings by category in JS instead of CTE
+    const { rows: allCategories } = await query(
+      `SELECT id, parent_id, name, slug, icon, sort_order, is_active
+       FROM categories
+       WHERE $1::boolean = TRUE OR is_active = TRUE
+       ORDER BY parent_id NULLS FIRST, sort_order ASC, name ASC`,
       [includeInactive],
     );
 
-    const byId = new Map();
+    // Count active listings per category
+    const { rows: listingCounts } = await query(
+      `SELECT category_id, COUNT(*)::int AS count
+       FROM listings WHERE status = 'active' AND category_id IS NOT NULL
+       GROUP BY category_id`
+    );
+    const countMap = new Map(listingCounts.map(r => [r.category_id, r.count]));
+    const categoriesMap = new Map(allCategories.map((category) => [category.id, { ...category, count: countMap.get(category.id) || 0, sub_categories: [] }]));
     const roots = [];
-    rows.forEach((category) => byId.set(category.id, { ...category, sub_categories: [] }));
-    rows.forEach((category) => {
-      const node = byId.get(category.id);
-      if (category.parent_id && byId.has(category.parent_id)) byId.get(category.parent_id).sub_categories.push(node);
-      else roots.push(node);
-    });
+    for (const category of categoriesMap.values()) {
+      if (category.parent_id) {
+        const parent = categoriesMap.get(category.parent_id);
+        if (parent) parent.sub_categories.push(category);
+      } else {
+        roots.push(category);
+      }
+    }
+    const sortTree = (nodeList) => {
+      nodeList.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      nodeList.forEach((node) => sortTree(node.sub_categories));
+    };
+    sortTree(roots);
+    console.log(`[getCategories] query ${Date.now() - startTime}ms, categories ${allCategories.length}`);
 
     res.json({ success: true, data: roots });
   } catch (err) { next(err); }
@@ -264,24 +274,23 @@ const getCategory = async (req, res, next) => {
 // POST /api/categories  (admin)
 const createCategory = async (req, res, next) => {
   try {
-    const { parent_id, name, slug, icon, description, sort_order, is_active } = req.body;
+    const { parent_id, name, slug, icon, sort_order, is_active } = req.body;
     const normalizedSlug = makeSlug(slug || name);
     if (!name || !normalizedSlug) {
       return res.status(422).json({ success: false, message: 'Kategori adi gerekli.' });
     }
 
     const { rows } = await query(
-      `INSERT INTO categories (parent_id, name, slug, icon, description, sort_order, is_active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
+      `INSERT INTO categories (parent_id, name, slug, icon, sort_order, is_active)
+       VALUES ($1,$2,$3,$4,$5,$6)
        ON CONFLICT (slug) DO UPDATE SET
          parent_id = EXCLUDED.parent_id,
          name = EXCLUDED.name,
          icon = EXCLUDED.icon,
-         description = EXCLUDED.description,
          sort_order = EXCLUDED.sort_order,
          is_active = EXCLUDED.is_active
        RETURNING *`,
-      [parent_id || null, name.trim(), normalizedSlug, icon || null, description || null, sort_order || 0, is_active !== false]
+      [parent_id || null, name.trim(), normalizedSlug, icon || null, sort_order || 0, is_active !== false]
     );
     res.status(201).json({ success: true, data: rows[0] });
   } catch (err) { next(err); }
@@ -290,7 +299,7 @@ const createCategory = async (req, res, next) => {
 // PATCH /api/categories/:id  (admin)
 const updateCategory = async (req, res, next) => {
   try {
-    const { parent_id, name, slug, icon, description, sort_order, is_active } = req.body;
+    const { parent_id, name, slug, icon, sort_order, is_active } = req.body;
     const hasParent = Object.prototype.hasOwnProperty.call(req.body, 'parent_id');
     const normalizedSlug = slug || name ? makeSlug(slug || name) : null;
 
@@ -324,11 +333,10 @@ const updateCategory = async (req, res, next) => {
          name        = COALESCE($3, name),
          slug        = COALESCE($4, slug),
          icon        = COALESCE($5, icon),
-         description = COALESCE($6, description),
-         sort_order  = COALESCE($7, sort_order),
-         is_active   = COALESCE($8, is_active)
-       WHERE id = $9 RETURNING *`,
-      [hasParent, parent_id || null, name, normalizedSlug, icon, description, sort_order, is_active, req.params.id]
+         sort_order  = COALESCE($6, sort_order),
+         is_active   = COALESCE($7, is_active)
+       WHERE id = $8 RETURNING *`,
+      [hasParent, parent_id || null, name, normalizedSlug, icon, sort_order, is_active, req.params.id]
     );
     if (!rows.length) return res.status(404).json({ success: false, message: 'Kategori bulunamadı.' });
     res.json({ success: true, data: rows[0] });

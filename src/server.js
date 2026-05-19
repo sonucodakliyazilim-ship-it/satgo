@@ -35,6 +35,8 @@ const customFieldRoutes = require('./routes/customField.routes');
 
 const app = express();
 const server = http.createServer(app);
+server.requestTimeout = 0;
+server.headersTimeout = 0;
 
 app.set('trust proxy', 1);
 
@@ -79,7 +81,7 @@ app.get('/api/users/me/profile', directAuth, userController.getMe);
 app.get('/api/listings/me', directAuth, listingController.getMyListings);
 app.post('/api/listings/with-images',
   directAuth,
-  uploadController.upload.array('images', 10),
+  uploadController.uploadMiddleware('images', 10),
   listingController.createListingWithImages,
 );
 app.post('/api/listings',
@@ -95,7 +97,7 @@ app.post('/api/listings',
 );
 app.post('/api/upload/listing-images/:listingId',
   directAuth,
-  uploadController.upload.array('images', 10),
+  uploadController.uploadMiddleware('images', 10),
   uploadController.uploadListingImages,
 );
 
@@ -144,12 +146,16 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error(err.stack);
   const status = err.status || err.statusCode || (err.name === 'MulterError' ? 400 : 500);
-  const message =
-    err.code === 'LIMIT_FILE_SIZE'
-      ? 'Fotoğraf boyutu en fazla 15 MB olabilir.'
-      : err.code === 'LIMIT_FILE_COUNT'
-        ? 'En fazla 10 fotoğraf yükleyebilirsiniz.'
-        : err.message || 'Sunucu hatası.';
+  let message = err.message || 'Sunucu hatası.';
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    message = 'Fotoğraf boyutu en fazla 15 MB olabilir.';
+  } else if (err.code === 'LIMIT_FILE_COUNT') {
+    message = 'En fazla 10 fotoğraf yükleyebilirsiniz.';
+  } else if (err.code === 'LIMIT_PART_COUNT' || err.code === 'LIMIT_FIELD_COUNT') {
+    message = 'Yükleme isteği çok büyük veya geçersiz. Lütfen fotoğrafları azaltıp tekrar deneyin.';
+  } else if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+    message = 'Fotoğraflar images alanı ile yüklenmelidir.';
+  }
 
   res.status(status).json({
     success: false,
@@ -159,9 +165,25 @@ app.use((err, req, res, next) => {
 
 socketHandler(io);
 
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
+const PORT = process.env.PORT || 5001;
+console.log('[server] listening on port', PORT);
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server çalışıyor: ${PORT}`);
+  console.log('[server] socket and routes ready');
+});
+
+server.on('error', (err) => {
+  console.error('[Server Error]', err.code, err.message);
+  process.exit(1);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[Uncaught Exception]', err.message);
+  process.exit(1);
+});
+
+process.on('exit', (code) => {
+  console.log('[Process Exit]', code);
 });
 
 module.exports = { app, io };

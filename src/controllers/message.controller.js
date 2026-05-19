@@ -6,7 +6,7 @@ const getConversations = async (req, res, next) => {
     const { rows } = await query(
       `SELECT conv.*,
               l.title AS listing_title, l.price AS listing_price, l.status AS listing_status,
-              (SELECT url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS listing_image,
+              (SELECT image_url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS listing_image,
               CASE WHEN conv.buyer_id = $1 THEN u_s.name ELSE u_b.name END AS other_name,
               NULL AS other_avatar,
               CASE WHEN conv.buyer_id = $1 THEN conv.buyer_unread ELSE conv.seller_unread END AS unread_count

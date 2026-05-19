@@ -13,6 +13,7 @@ router.patch('/users/:id/status',     ctrl.setUserStatus);
 
 router.get('/listings',               ctrl.getListings);
 router.patch('/listings/:id/status',  ctrl.setListingStatus);
+router.delete('/listings/:id',        ctrl.deleteListing);
 
 router.get('/reports',                ctrl.getReports);
 router.patch('/reports/:id',          ctrl.resolveReport);

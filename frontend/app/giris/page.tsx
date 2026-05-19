@@ -26,6 +26,7 @@ function GirisContent() {
   const nextPath = rawNextPath.startsWith('/') && !rawNextPath.startsWith('//') ? rawNextPath : '/'
   const oauthRedirect = `/giris?oauth=success&next=${encodeURIComponent(nextPath)}`
   const googleOAuthUrl = `${API_URL}/auth/oauth/google/start?redirect=${encodeURIComponent(oauthRedirect)}`
+  const githubOAuthUrl = `${API_URL}/auth/oauth/github/start?redirect=${encodeURIComponent(oauthRedirect)}`
 
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((current) => ({ ...current, [key]: e.target.value }))
@@ -126,6 +127,13 @@ function GirisContent() {
               >
                 <span className="grid h-6 w-6 place-items-center rounded-full bg-white text-base font-black text-[#4285F4] shadow-sm">G</span>
                 Google ile giriş
+              </a>
+              <a
+                href={githubOAuthUrl}
+                className="flex h-11 items-center justify-center gap-3 rounded-lg border border-gray-200 bg-black text-sm font-black text-white hover:bg-gray-900"
+              >
+                <span className="grid h-6 w-6 place-items-center rounded-full bg-white text-base font-black shadow-sm">GH</span>
+                GitHub ile giriş
               </a>
             </div>
 

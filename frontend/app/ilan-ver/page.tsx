@@ -81,20 +81,28 @@ type CategoryNode = {
 type CustomField = {
   id: string
   label: string
-  field_type: 'input' | 'text' | 'number' | 'select' | 'checkbox' | 'boolean' | 'textarea' | 'radio' | 'multi_select'
+  key?: string
+  field_key?: string
+  type?: 'text' | 'number' | 'select' | 'checkbox' | 'textarea' | 'radio' | 'multi_select'
+  field_type?: 'text' | 'number' | 'select' | 'checkbox' | 'boolean' | 'textarea' | 'radio' | 'multi_select' | 'input'
+  required?: boolean
   is_required?: boolean
   options?: Array<{ value: string; label: string }>
 }
 
 const MAX_IMAGE_COUNT = 10
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024
-const IMAGE_UPLOAD_EDGE = 1600
-const IMAGE_UPLOAD_QUALITY = 0.82
-const DISPLAYABLE_IMAGE_RE = /\.(jpe?g|jfif|png|webp|avif|gif)$/i
+const IMAGE_UPLOAD_EDGE = 1920
+const IMAGE_UPLOAD_QUALITY = 0.75
+const IMAGE_UPLOAD_TIMEOUT_MS = 0
+const IMAGE_UPLOAD_RETRIES = 2
+const IMAGE_UPLOAD_PARALLEL_LIMIT = 5
+const DISPLAYABLE_IMAGE_RE = /\.(jpe?g|png|webp|avif|gif)$/i
 
 const isDisplayableImageFile = (file: File) => {
   const mime = (file.type || '').toLowerCase()
   const allowedMimes = ['image/jpeg', 'image/pjpeg', 'image/png', 'image/webp', 'image/avif', 'image/gif']
+  if (/\.(heic|heif)$/i.test(file.name) || ['image/heic', 'image/heif'].includes(mime)) return false
   return mime ? allowedMimes.includes(mime) : DISPLAYABLE_IMAGE_RE.test(file.name)
 }
 
@@ -135,6 +143,27 @@ const compressImageForUpload = async (file: File) => {
   } catch {
     return file
   }
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const isRetriableUploadError = (err: any) => {
+  const status = err?.response?.status
+  if (status === 401 || status === 400 || status === 403 || status === 404 || status === 413 || status === 422) return false
+  return !status || status === 408 || status === 429 || status >= 500 || err?.code === 'ECONNABORTED'
+}
+
+const getUploadErrorMessage = (err: any) => {
+  if (err?.response?.data?.errors?.[0]?.message) return err.response.data.errors[0].message
+  if (err?.response?.data?.message) return err.response.data.message
+  if (err?.code === 'ECONNABORTED' || /timeout/i.test(err?.message || '')) {
+    return 'Fotoğraf yükleme süresi doldu. Bağlantını kontrol edip tekrar dene.'
+  }
+  if (!err?.response) {
+    if (err?.message && !/network error|request failed/i.test(err.message)) return err.message
+    return 'Fotoğraflar yüklenirken bağlantı kesildi. Lütfen tekrar dene.'
+  }
+  return 'Fotoğraf yüklenemedi.'
 }
 
 const VEHICLE_BRANDS: Record<string, string[]> = {
@@ -289,6 +318,7 @@ export default function CreateListingPage() {
   const [previews, setPreviews] = useState<Array<{ file: File; url: string }>>([])
   const [saving, setSaving] = useState(false)
   const [savingLabel, setSavingLabel] = useState('')
+  const [uploadProgress, setUploadProgress] = useState(0)
   const [form, setForm] = useState({
     category_id: '',
     sub_category_id: '',
@@ -423,13 +453,14 @@ export default function CreateListingPage() {
   }, [selectedHierarchyGroup])
 
   useEffect(() => {
-    if (!form.category_id) {
+    const fieldCategoryId = selectedLeafCategory?.id || form.sub_category_id || form.category_id
+    if (!fieldCategoryId) {
       setCustomFields([])
       setCustomFieldValues({})
       return
     }
     customFieldsApi
-      .getForCategory(form.category_id, form.sub_category_id || undefined)
+      .getForCategory(fieldCategoryId)
       .then(({ data }) => {
         setCustomFields(data.data || [])
         setCustomFieldValues((prev) => {
@@ -443,7 +474,7 @@ export default function CreateListingPage() {
       .catch(() => {
         setCustomFields([])
       })
-  }, [form.category_id, form.sub_category_id])
+  }, [selectedLeafCategory?.id, form.category_id, form.sub_category_id])
 
   const selectedCity = (cities as any[]).find((c) => c.cityName === form.city)
   const selectedVehicleBrand = vehicleTree.find((item) => item.label === form.vehicle_brand)
@@ -540,7 +571,7 @@ export default function CreateListingPage() {
     }
 
     if (accepted.length !== selected.length) {
-      toast.error('Sadece JPG, PNG, WEBP, AVIF veya GIF yuklenebilir. HEIC dosyalari tarayicida gorunmedigi icin kabul edilmiyor.')
+      toast.error('Sadece JPG, JPEG, PNG, WEBP, AVIF veya GIF yuklenebilir. HEIC/HEIF kabul edilmiyor.')
     }
 
     if (sized.length !== accepted.length) {
@@ -567,6 +598,7 @@ export default function CreateListingPage() {
       return
     }
     setSaving(true)
+    setUploadProgress(0)
     setSavingLabel('Ilan kaydediliyor...')
     try {
       const vehicleLabels = [form.vehicle_brand, form.vehicle_model, form.vehicle_series, form.vehicle_package].filter(Boolean)
@@ -582,10 +614,11 @@ export default function CreateListingPage() {
         isVehicleCategory ? vehicleLabels : isMotorCategory ? motorLabels : genericLabels
       const hierarchyPath =
         isVehicleCategory ? vehiclePath : isMotorCategory ? motorPath : genericNodePath.map((item) => item.id)
+      const leafCategoryId = Number(selectedLeafCategory?.id || form.sub_category_id || form.category_id)
 
       const payload: any = {
-        category_id: Number(form.category_id),
-        sub_category_id: form.sub_category_id ? Number(form.sub_category_id) : undefined,
+        category_id: leafCategoryId,
+        sub_category_id: selectedSubCategory ? Number(selectedSubCategory.id) : undefined,
         title: form.title,
         description: form.description,
         price: form.price ? Number(form.price) : undefined,
@@ -658,35 +691,95 @@ export default function CreateListingPage() {
         }
       }
 
-      setSavingLabel('Ilan kaydediliyor...')
-      const { data } = await listingsApi.create(payload)
-      const listingId = data.data.id
+      setSavingLabel('İlan kaydediliyor...')
+      const created = await listingsApi.create(payload)
+      const listing = created.data?.data
+      if (!listing?.id) {
+        throw new Error('İlan oluşturulamadı.')
+      }
 
-      setSavingLabel('Fotograflar yukleniyor...')
-      const preparedFiles = await Promise.all(files.map(compressImageForUpload))
-      let uploadedCount = 0
-      let uploadFailed = false
+      const uploadedImages: any[] = []
+      const failedUploads: string[] = []
+      const fileProgress = new Array(files.length).fill(0)
 
-      for (const file of preparedFiles) {
-        const imageForm = new FormData()
-        imageForm.append('images', file)
+      const updateParallelProgress = () => {
+        const total = fileProgress.reduce((sum, value) => sum + value, 0)
+        setUploadProgress(Math.max(1, Math.min(99, Math.round((total / files.length) * 100))))
+      }
+
+      const uploadPreparedFile = async (file: File, index: number, attempt = 0): Promise<any[]> => {
+        const totalAttempts = IMAGE_UPLOAD_RETRIES + 1
+        const labelPrefix = attempt
+          ? `Fotoğraf tekrar yükleniyor (${attempt + 1}/${totalAttempts})`
+          : 'Fotoğraf yükleniyor'
+        setSavingLabel(`${labelPrefix}: ${index + 1}/${files.length}`)
+
+        const formData = new FormData()
+        formData.append('images', file, file.name || 'satgo-fotograf.jpg')
 
         try {
-          const uploadResult = await uploadApi.uploadImages(listingId, imageForm)
-          uploadedCount += uploadResult.data?.data?.length || 0
+          const { data } = await uploadApi.uploadImages(listing.id, formData, {
+            timeout: IMAGE_UPLOAD_TIMEOUT_MS,
+            onUploadProgress: (event: any) => {
+              if (!event.total) return
+              const currentFileProgress = event.loaded / event.total
+              fileProgress[index] = Math.max(fileProgress[index], 0.2 + currentFileProgress * 0.75)
+              updateParallelProgress()
+            },
+          })
+          fileProgress[index] = 1
+          updateParallelProgress()
+          return data.data || []
         } catch (uploadErr: any) {
-          if (uploadErr?.response?.status === 401) throw uploadErr
-          uploadFailed = true
+          if (attempt < IMAGE_UPLOAD_RETRIES && isRetriableUploadError(uploadErr)) {
+            await sleep(900 * (attempt + 1))
+            return uploadPreparedFile(file, index, attempt + 1)
+          }
+          fileProgress[index] = 1
+          updateParallelProgress()
+          throw uploadErr
         }
       }
 
-      if (uploadedCount) {
-        toast.success(uploadFailed ? 'Ilan olusturuldu, bazi fotograflar yuklenemedi' : 'Ilan fotograflarla olusturuldu')
-      } else {
-        toast.success('Ilan olusturuldu')
-        toast.error('Fotograflar yuklenemedi; ilan yine de kaydedildi.')
+      for (let offset = 0; offset < files.length; offset += IMAGE_UPLOAD_PARALLEL_LIMIT) {
+        const batch = files.slice(offset, offset + IMAGE_UPLOAD_PARALLEL_LIMIT)
+        setSavingLabel(`Fotoğraflar hazırlanıyor: ${offset + 1}-${Math.min(offset + batch.length, files.length)}/${files.length}`)
+
+        await Promise.all(batch.map(async (file, batchIndex) => {
+          const index = offset + batchIndex
+          try {
+            fileProgress[index] = Math.max(fileProgress[index], 0.05)
+            updateParallelProgress()
+
+            const prepared = await compressImageForUpload(file)
+            fileProgress[index] = Math.max(fileProgress[index], 0.2)
+            updateParallelProgress()
+
+            if (prepared.size > MAX_IMAGE_BYTES) {
+              throw new Error('Fotoğraf boyutu en fazla 15 MB olabilir.')
+            }
+
+            const rows = await uploadPreparedFile(prepared, index)
+            uploadedImages.push(...rows)
+          } catch (uploadErr: any) {
+            failedUploads.push(`${file.name}: ${getUploadErrorMessage(uploadErr)}`)
+            fileProgress[index] = 1
+            updateParallelProgress()
+          }
+        }))
       }
-      router.push(`/ilan/${listingId}`)
+
+      setUploadProgress(100)
+      if (failedUploads.length) {
+        if (uploadedImages.length) {
+          toast.error(`${uploadedImages.length} fotoğraf yüklendi, ${failedUploads.length} fotoğraf yüklenemedi. İlan silinmedi.`)
+        } else {
+          toast.error(`İlan oluşturuldu ama fotoğraflar yüklenemedi. İlan silinmedi. ${failedUploads[0] || ''}`)
+        }
+      } else {
+        toast.success(`${uploadedImages.length} fotoğrafla ilan oluşturuldu`)
+      }
+      router.push(`/ilan/${listing.id}`)
     } catch (err: any) {
       if (err?.response?.status === 401) {
         setUser(null)
@@ -695,10 +788,11 @@ export default function CreateListingPage() {
         return
       }
 
-      toast.error(err?.response?.data?.errors?.[0]?.message || err?.response?.data?.message || 'İlan oluşturulamadı')
+      toast.error(err?.response?.data?.message || err?.message || 'İlan oluşturulamadı.')
     } finally {
       setSaving(false)
       setSavingLabel('')
+      setUploadProgress(0)
     }
   }
 
@@ -787,8 +881,10 @@ export default function CreateListingPage() {
             <h2 className="font-bold md:col-span-2">{selectedLeafCategory?.name || 'Kategori'} Bilgileri</h2>
             {customFields.map((f: any) => {
               const value = customFieldValues[f.id] ?? ''
-              const required = !!f.is_required
-              if (f.field_type === 'select') {
+              const rawFieldType = f.type || f.field_type || 'text'
+              const fieldType = rawFieldType === 'input' ? 'text' : rawFieldType === 'boolean' ? 'checkbox' : rawFieldType
+              const required = !!(f.required ?? f.is_required)
+              if (fieldType === 'select') {
                 return (
                   <Select
                     key={f.id}
@@ -803,7 +899,7 @@ export default function CreateListingPage() {
                   />
                 )
               }
-              if (f.field_type === 'radio') {
+              if (fieldType === 'radio') {
                 return (
                   <div key={f.id}>
                     <label className="label">{f.label}{required ? ' *' : ''}</label>
@@ -826,7 +922,7 @@ export default function CreateListingPage() {
                   </div>
                 )
               }
-              if (f.field_type === 'multi_select') {
+              if (fieldType === 'multi_select') {
                 const selectedValues = Array.isArray(customFieldValues[f.id]) ? customFieldValues[f.id] : []
                 return (
                   <div key={f.id}>
@@ -846,7 +942,7 @@ export default function CreateListingPage() {
                   </div>
                 )
               }
-              if (f.field_type === 'boolean') {
+              if (fieldType === 'boolean') {
                 return (
                   <Select
                     key={f.id}
@@ -862,7 +958,7 @@ export default function CreateListingPage() {
                   />
                 )
               }
-              if (f.field_type === 'checkbox') {
+              if (fieldType === 'checkbox') {
                 return (
                   <label key={f.id} className="flex min-h-[46px] items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700">
                     <input
@@ -876,7 +972,7 @@ export default function CreateListingPage() {
                   </label>
                 )
               }
-              if (f.field_type === 'textarea') {
+              if (fieldType === 'textarea') {
                 return (
                   <div key={f.id} className="md:col-span-2">
                     <label className="label">{f.label}{required ? ' *' : ''}</label>
@@ -890,7 +986,7 @@ export default function CreateListingPage() {
                   </div>
                 )
               }
-              if (f.field_type === 'number') {
+              if (fieldType === 'number') {
                 return (
                   <Field
                     key={f.id}
@@ -1056,7 +1152,7 @@ export default function CreateListingPage() {
           <label className="border-2 border-dashed border-gray-200 rounded-xl p-5 flex min-h-36 cursor-pointer flex-col items-center justify-center gap-2 text-center transition-colors hover:border-brand">
             <ImagePlus className="w-7 h-7 text-brand" />
             <span className="text-sm font-semibold">Fotoğraf seç veya sürükle</span>
-            <span className="text-xs text-gray-400">En fazla 10 adet JPG, PNG, WEBP, AVIF veya GIF</span>
+            <span className="text-xs text-gray-400">En fazla 10 adet, görsel başı 15 MB. JPG, JPEG, PNG, WEBP, AVIF veya GIF</span>
             <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/avif,image/gif,.jpg,.jpeg,.png,.webp,.avif,.gif" onChange={chooseFiles} className="hidden" />
           </label>
           {!!previews.length && (
@@ -1078,8 +1174,23 @@ export default function CreateListingPage() {
           <textarea value={form.description} onChange={set('description')} rows={5} className="input resize-none" />
         </div>
 
-        <button type="submit" disabled={saving} className="btn-brand w-full">
-          {saving ? savingLabel || 'Kaydediliyor...' : 'İlanı Yayına Hazırla'}
+        {saving && (
+          <div className="rounded-lg border border-gray-200 bg-white p-3">
+            <div className="flex items-center justify-between gap-3 text-xs font-bold text-gray-600">
+              <span>{savingLabel || 'Kaydediliyor...'}</span>
+              <span>{uploadProgress ? `%${uploadProgress}` : ''}</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-gray-100">
+              <div
+                className="h-full rounded-full bg-brand transition-all"
+                style={{ width: `${uploadProgress || 8}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        <button type="submit" disabled={saving} className="btn-brand min-h-12 w-full whitespace-normal px-4 text-center">
+          {saving ? 'Kaydediliyor...' : 'İlanı Yayına Hazırla'}
         </button>
       </form>
     </div>

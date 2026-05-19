@@ -7,7 +7,7 @@ const getFavorites = async (req, res, next) => {
       `SELECT l.*, f.created_at AS favorited_at,
               c.name AS category_name, c.icon AS category_icon,
               u.name AS seller_name,
-              (SELECT url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS primary_image
+              (SELECT image_url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS primary_image
        FROM favorites f
        JOIN listings l ON l.id = f.listing_id
        JOIN categories c ON c.id = l.category_id

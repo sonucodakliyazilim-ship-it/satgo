@@ -66,6 +66,20 @@ const slugify = (value: string) =>
   value
     .trim()
     .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
     .replace(/ğ/g, 'g')
     .replace(/ü/g, 'u')
     .replace(/ş/g, 's')
@@ -192,6 +206,21 @@ export default function AdminPage() {
       load()
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Durum güncellenemedi')
+    } finally {
+      setProcessingListingId(null)
+    }
+  }
+
+  const deleteListing = async (id: string) => {
+    if (!window.confirm('Bu ilan kalici olarak silinsin mi?')) return
+    setProcessingListingId(id)
+    try {
+      await adminApi.deleteListing(id)
+      toast.success('Ilan silindi')
+      setListings((current) => current.filter((listing) => listing.id !== id))
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Ilan silinemedi')
     } finally {
       setProcessingListingId(null)
     }
@@ -793,7 +822,7 @@ export default function AdminPage() {
                   <td className="p-3"><StatusBadge status={order.status} order /></td>
                   <td className="p-3">
                     {order.status === 'pending' ? (
-                      <div className="flex justify-end gap-2">
+                      <div className="flex items-center justify-end gap-2 text-xs font-semibold text-gray-400">
                         <button
                           onClick={() => approveOrder(order.id)}
                           disabled={processingOrderId === order.id}
@@ -875,11 +904,27 @@ export default function AdminPage() {
                         >
                           Reddet
                         </button>
+                        <button
+                          onClick={() => deleteListing(listing.id)}
+                          disabled={processingListingId === listing.id}
+                          className="btn-outline flex items-center gap-1 px-3 py-1.5 text-xs text-red-500"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Sil
+                        </button>
                       </div>
                     ) : (
-                      <p className="text-right text-xs font-semibold text-gray-400">
+                      <div className="flex justify-end gap-2">
                         {listing.status === 'active' ? 'Onaylandı' : listing.status === 'rejected' ? 'Reddedildi' : 'Sonuçlandı'}
-                      </p>
+                        <button
+                          onClick={() => deleteListing(listing.id)}
+                          disabled={processingListingId === listing.id}
+                          className="btn-outline flex items-center gap-1 px-3 py-1.5 text-xs text-red-500"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Sil
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>

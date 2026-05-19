@@ -3,7 +3,7 @@ const { body, param } = require('express-validator');
 const ctrl = require('../controllers/listing.controller');
 const { authenticate, optionalAuth, requireOwner } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
-const { upload } = require('../controllers/upload.controller');
+const { uploadMiddleware } = require('../controllers/upload.controller');
 
 router.get('/', optionalAuth, ctrl.getListings);
 
@@ -15,7 +15,7 @@ router.get('/user/:userId', ctrl.getUserListings);
 
 router.post('/with-images',
   authenticate,
-  upload.array('images', 10),
+  uploadMiddleware('images', 10),
   ctrl.createListingWithImages,
 );
 
