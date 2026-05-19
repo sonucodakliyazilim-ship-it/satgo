@@ -93,8 +93,11 @@ type CustomField = {
 const MAX_IMAGE_COUNT = 10
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024
 const IMAGE_UPLOAD_TIMEOUT_MS = 45000
-const IMAGE_UPLOAD_RETRIES = 2
+const IMAGE_UPLOAD_RETRIES = 1
 const IMAGE_UPLOAD_PARALLEL_LIMIT = 5
+const IMAGE_CLIENT_MAX_DIMENSION = 1920
+const IMAGE_CLIENT_JPEG_QUALITY = 0.78
+const IMAGE_CLIENT_OPTIMIZE_MIN_BYTES = 1024 * 1024
 const DISPLAYABLE_IMAGE_RE = /\.(jpe?g|png|webp|avif|gif)$/i
 
 const isDisplayableImageFile = (file: File) => {
@@ -105,6 +108,65 @@ const isDisplayableImageFile = (file: File) => {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const yieldToBrowser = () =>
+  new Promise<void>((resolve) => {
+    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+      resolve()
+      return
+    }
+    window.requestAnimationFrame(() => resolve())
+  })
+
+const canvasToBlob = (canvas: HTMLCanvasElement, type: string, quality: number) =>
+  new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, quality))
+
+const optimizeImageForUpload = async (file: File) => {
+  if (typeof window === 'undefined' || typeof createImageBitmap !== 'function') return file
+
+  const mime = (file.type || '').toLowerCase()
+  if (mime === 'image/gif' || /\.gif$/i.test(file.name)) return file
+  if (file.size < IMAGE_CLIENT_OPTIMIZE_MIN_BYTES && (mime === 'image/jpeg' || mime === 'image/pjpeg')) return file
+
+  try {
+    await yieldToBrowser()
+    const bitmap = await createImageBitmap(file)
+    const longestEdge = Math.max(bitmap.width, bitmap.height)
+    const scale = Math.min(1, IMAGE_CLIENT_MAX_DIMENSION / longestEdge)
+    const shouldResize = scale < 1
+    const shouldReencode = file.size >= IMAGE_CLIENT_OPTIMIZE_MIN_BYTES || mime !== 'image/jpeg'
+
+    if (!shouldResize && !shouldReencode) {
+      bitmap.close?.()
+      return file
+    }
+
+    const width = Math.max(1, Math.round(bitmap.width * scale))
+    const height = Math.max(1, Math.round(bitmap.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+
+    const ctx = canvas.getContext('2d', { alpha: false })
+    if (!ctx) {
+      bitmap.close?.()
+      return file
+    }
+
+    ctx.fillStyle = '#fff'
+    ctx.fillRect(0, 0, width, height)
+    ctx.drawImage(bitmap, 0, 0, width, height)
+    bitmap.close?.()
+
+    const blob = await canvasToBlob(canvas, 'image/jpeg', IMAGE_CLIENT_JPEG_QUALITY)
+    if (!blob || blob.size >= file.size * 0.95) return file
+
+    const safeName = file.name.replace(/\.[^.]+$/, '') || 'satgo-fotograf'
+    return new File([blob], `${safeName}.jpg`, { type: 'image/jpeg', lastModified: file.lastModified || Date.now() })
+  } catch {
+    return file
+  }
+}
 
 const isRetriableUploadError = (err: any) => {
   const status = err?.response?.status
@@ -336,18 +398,6 @@ export default function CreateListingPage() {
       .catch(() => setCategories(defaultCategories))
   }, [])
 
-  useEffect(() => {
-    hierarchyApi
-      .getTree('vehicle')
-      .then(({ data }) => setVehicleTree(data.data?.length ? data.data : fallbackVehicleTree))
-      .catch(() => setVehicleTree(fallbackVehicleTree))
-
-    hierarchyApi
-      .getTree('motor')
-      .then(({ data }) => setMotorTree(data.data?.length ? data.data : fallbackMotorTree))
-      .catch(() => setMotorTree(fallbackMotorTree))
-  }, [])
-
   const selectedCategory = findCategoryById(categories, categoryPath[0] || form.category_id)
   const selectedLeafCategory = findCategoryById(categories, categoryPath[categoryPath.length - 1] || form.sub_category_id || form.category_id)
   const selectedSubCategory = selectedLeafCategory && selectedCategory && String(selectedLeafCategory.id) !== String(selectedCategory.id)
@@ -357,6 +407,23 @@ export default function CreateListingPage() {
   const isVehicleCategory = selectedCategory?.slug === 'arac'
   const isMotorCategory = selectedCategory?.slug === 'motor'
   const isRealEstateCategory = selectedCategory?.slug === 'emlak'
+
+  useEffect(() => {
+    if (!isVehicleCategory) return
+    hierarchyApi
+      .getTree('vehicle')
+      .then(({ data }) => setVehicleTree(data.data?.length ? data.data : fallbackVehicleTree))
+      .catch(() => setVehicleTree(fallbackVehicleTree))
+  }, [isVehicleCategory])
+
+  useEffect(() => {
+    if (!isMotorCategory) return
+    hierarchyApi
+      .getTree('motor')
+      .then(({ data }) => setMotorTree(data.data?.length ? data.data : fallbackMotorTree))
+      .catch(() => setMotorTree(fallbackMotorTree))
+  }, [isMotorCategory])
+
   const categoryLevels = useMemo(() => {
     const levels: Array<{ label: string; value: string; options: CategoryNode[]; required: boolean }> = []
     let parentId = ''
@@ -556,7 +623,6 @@ export default function CreateListingPage() {
       toast.error('Ilan yayinlamak icin en az 1 gercek fotograf ekle.')
       return
     }
-    console.log('[upload-ui] submit.start', { fileCount: files.length })
     setSaving(true)
     setUploadProgress(0)
     setSavingLabel('Ilan kaydediliyor...')
@@ -688,14 +754,6 @@ export default function CreateListingPage() {
         const last = preparedFiles[preparedFiles.length - 1]?.index ?? first
         setSavingLabel(`${labelPrefix}: ${first + 1}-${last + 1}/${files.length}`)
 
-        console.log('[upload-ui] request.start', {
-          listingId: listing.id,
-          attempt,
-          batchSize: preparedFiles.length,
-          firstIndex: first,
-          lastIndex: last,
-        })
-
         const formData = new FormData()
         preparedFiles.forEach(({ file }) => {
           formData.append('images', file, file.name || 'satgo-fotograf.jpg')
@@ -716,19 +774,12 @@ export default function CreateListingPage() {
               updateParallelProgress()
             },
           })
-          console.log('[upload-ui] request.end', {
-            listingId: listing.id,
-            attempt,
-            status: data?.success ? 'ok' : 'error',
-            inserted: Array.isArray(data?.data) ? data.data.length : null,
-          })
           preparedFiles.forEach(({ index }) => {
             fileProgress[index] = 1
           })
           updateParallelProgress()
           return data.data || []
         } catch (uploadErr: any) {
-          console.error('[upload-ui] request.error', { listingId: listing.id, attempt, message: uploadErr?.message || uploadErr, uploadErr })
           if (attempt < IMAGE_UPLOAD_RETRIES && isRetriableUploadError(uploadErr)) {
             await sleep(900 * (attempt + 1))
             return uploadPreparedBatch(preparedFiles, attempt + 1)
@@ -753,14 +804,16 @@ export default function CreateListingPage() {
             fileProgress[index] = Math.max(fileProgress[index], 0.08)
             updateParallelProgress()
 
-            fileProgress[index] = Math.max(fileProgress[index], 0.15)
+            setSavingLabel(`Fotoğraflar hızlandırılıyor: ${index + 1}/${files.length}`)
+            const optimized = await optimizeImageForUpload(file)
+            fileProgress[index] = Math.max(fileProgress[index], 0.22)
             updateParallelProgress()
 
-            if (file.size > MAX_IMAGE_BYTES) {
+            if (optimized.size > MAX_IMAGE_BYTES) {
               throw new Error('Fotoğraf boyutu en fazla 15 MB olabilir.')
             }
 
-            preparedResults.push({ file, index, originalName: file.name })
+            preparedResults.push({ file: optimized, index, originalName: file.name })
           } catch (uploadErr: any) {
             failedUploads.push(`${file.name}: ${getUploadErrorMessage(uploadErr)}`)
             fileProgress[index] = 1

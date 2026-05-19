@@ -9,10 +9,29 @@ const MAX_LISTING_FILE_SIZE = 15 * 1024 * 1024;
 const MAX_FILES_PER_LISTING = 10;
 const IMAGE_PROCESS_CONCURRENCY = 5;
 const IMAGE_MAX_DIMENSION = 1920;
+const IMAGE_OUTPUT_QUALITY = Number(process.env.LISTING_IMAGE_QUALITY || 78);
+const IMAGE_REENCODE_MIN_BYTES = 1024 * 1024;
+const UPLOAD_DEBUG = process.env.UPLOAD_DEBUG === 'true';
+const ALWAYS_LOG_STEPS = new Set([
+  'multer.parse.start',
+  'multer.parse.end',
+  'multer.parse.error',
+  'request.start',
+  'request.end',
+  'request.error',
+  'response.finish',
+  'response.close',
+  'prepare.all.start',
+  'prepare.all.end',
+  'transaction.end',
+]);
+
+sharp.concurrency(Number(process.env.SHARP_CONCURRENCY || 2));
 
 const storage = multer.memoryStorage();
 
 const uploadLog = (step, details = {}) => {
+  if (!UPLOAD_DEBUG && !ALWAYS_LOG_STEPS.has(step)) return;
   console.log(`[upload] ${step}`, {
     ...details,
     at: new Date().toISOString(),
@@ -208,6 +227,12 @@ const processImageBuffer = async (file, index) => {
   const mime = String(file.mimetype || '').toLowerCase();
   const animated = mime === 'image/gif';
   const started = Date.now();
+  const originalResult = {
+    buffer: fileBuffer,
+    mimeType: mime || 'image/jpeg',
+    ext: extensionByMime[mime] || path.extname(file.originalname).toLowerCase() || '.jpg',
+    optimized: false,
+  };
 
   uploadLog('sharp.metadata.start', {
     index,
@@ -222,6 +247,11 @@ const processImageBuffer = async (file, index) => {
     const shouldResize =
       (metadata.width && metadata.width > IMAGE_MAX_DIMENSION) ||
       (metadata.height && metadata.height > IMAGE_MAX_DIMENSION);
+    const shouldReencode =
+      !animated &&
+      (shouldResize ||
+        fileBuffer.length >= IMAGE_REENCODE_MIN_BYTES ||
+        !['jpeg', 'jpg'].includes(String(metadata.format || '').toLowerCase()));
 
     uploadLog('sharp.metadata.end', {
       index,
@@ -231,55 +261,75 @@ const processImageBuffer = async (file, index) => {
       format: metadata.format || null,
       animated,
       shouldResize,
+      shouldReencode,
       durationMs: Date.now() - started,
     });
 
-    if (!shouldResize) {
-      uploadLog('sharp.resize.skip', {
+    if (!shouldReencode) {
+      uploadLog('sharp.optimize.skip', {
         index,
         originalName: file.originalname,
         reason: 'inside-limit',
         maxDimension: IMAGE_MAX_DIMENSION,
       });
-      return fileBuffer;
+      return originalResult;
     }
 
-    const resizeStarted = Date.now();
-    uploadLog('sharp.resize.start', {
+    const optimizeStarted = Date.now();
+    uploadLog('sharp.optimize.start', {
       index,
       originalName: file.originalname,
       maxDimension: IMAGE_MAX_DIMENSION,
       animated,
+      quality: IMAGE_OUTPUT_QUALITY,
     });
 
-    let pipeline = sharp(fileBuffer, { failOnError: false, animated });
-    if (!animated) pipeline = pipeline.rotate();
+    let pipeline = sharp(fileBuffer, { failOnError: false });
+    pipeline = pipeline.rotate();
     pipeline = pipeline.resize({
       width: IMAGE_MAX_DIMENSION,
       height: IMAGE_MAX_DIMENSION,
       fit: 'inside',
       withoutEnlargement: true,
     });
-    if (animated) pipeline = pipeline.gif();
+    pipeline = pipeline.jpeg({
+      quality: IMAGE_OUTPUT_QUALITY,
+      mozjpeg: false,
+    });
 
-    const resized = await pipeline.toBuffer();
-    uploadLog('sharp.resize.end', {
+    const optimized = await pipeline.toBuffer();
+    uploadLog('sharp.optimize.end', {
       index,
       originalName: file.originalname,
       originalBytes: fileBuffer.length,
-      resizedBytes: resized.length,
-      durationMs: Date.now() - resizeStarted,
+      optimizedBytes: optimized.length,
+      durationMs: Date.now() - optimizeStarted,
     });
 
-    return resized;
+    if (!shouldResize && optimized.length >= fileBuffer.length * 0.95) {
+      uploadLog('sharp.optimize.keep-original', {
+        index,
+        originalName: file.originalname,
+        originalBytes: fileBuffer.length,
+        optimizedBytes: optimized.length,
+      });
+      return originalResult;
+    }
+
+    return {
+      buffer: optimized,
+      mimeType: 'image/jpeg',
+      ext: '.jpg',
+      optimized: true,
+    };
   } catch (err) {
-    uploadWarn('sharp.resize.error.original-kept', {
+    uploadWarn('sharp.optimize.error.original-kept', {
       index,
       originalName: file.originalname,
       message: err.message,
       durationMs: Date.now() - started,
     });
-    return fileBuffer;
+    return originalResult;
   }
 };
 
@@ -294,13 +344,15 @@ const prepareListingImage = async (listingId, file, index) => {
     storageMode: getListingImageStorageMode(),
   });
 
-  const processedBuffer = await processImageBuffer(file, index);
+  const processedImage = await processImageBuffer(file, index);
   uploadLog('prepare.processed', {
     listingId,
     index,
     originalName: file.originalname,
     originalSize: file.buffer.length,
-    processedSize: processedBuffer.length,
+    processedSize: processedImage.buffer.length,
+    mimeType: processedImage.mimeType,
+    optimized: processedImage.optimized,
     durationMs: Date.now() - startTime,
   });
 
@@ -309,26 +361,26 @@ const prepareListingImage = async (listingId, file, index) => {
       listingId,
       index,
       originalName: file.originalname,
-      bytes: processedBuffer.length,
+      bytes: processedImage.buffer.length,
     });
     return {
       storage: 'database',
-      buffer: processedBuffer,
-      mimeType: file.mimetype || 'image/jpeg',
+      buffer: processedImage.buffer,
+      mimeType: processedImage.mimeType,
     };
   }
 
   const uploadRoot = getUploadRoot();
   const directory = path.join(uploadRoot, 'listings', String(listingId));
-  const ext = extensionByMime[file.mimetype] || path.extname(file.originalname).toLowerCase() || '.jpg';
+  const ext = processedImage.ext || extensionByMime[processedImage.mimeType] || path.extname(file.originalname).toLowerCase() || '.jpg';
   const filename = `${Date.now()}-${crypto.randomUUID()}${ext}`;
   const filePath = path.join(directory, filename);
 
   try {
     uploadLog('filesystem.write.start', { listingId, index, filePath });
     await fs.promises.mkdir(directory, { recursive: true });
-    await fs.promises.writeFile(filePath, processedBuffer);
-    uploadLog('filesystem.write.end', { listingId, index, filePath, bytes: processedBuffer.length });
+    await fs.promises.writeFile(filePath, processedImage.buffer);
+    uploadLog('filesystem.write.end', { listingId, index, filePath, bytes: processedImage.buffer.length });
   } catch (err) {
     if (['EACCES', 'ENOENT', 'ENOSPC', 'EROFS'].includes(err.code)) {
       err.status = 500;
