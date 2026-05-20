@@ -412,15 +412,10 @@ const adminDelete = async (req, res, next) => {
 const upsertListingCustomFields = async (client, listingId, customFields = []) => {
   if (!Array.isArray(customFields) || !customFields.length) return;
 
+  const rowMap = new Map();
   for (const item of customFields) {
     const fieldId = String(item?.field_id || item?.id || '').trim();
     if (!fieldId) continue;
-
-    const fieldRow = await client.query(
-      'SELECT id, "type" FROM custom_fields WHERE id = $1 AND is_active = TRUE',
-      [fieldId],
-    );
-    if (!fieldRow.rows.length) continue;
 
     const value = item?.value;
     const normalizedValue = Array.isArray(value)
@@ -429,15 +424,29 @@ const upsertListingCustomFields = async (client, listingId, customFields = []) =
         ? null
         : String(value);
 
-    await client.query(
-      `INSERT INTO listing_field_values (listing_id, field_id, value)
-       VALUES ($1,$2,$3)
-       ON CONFLICT (listing_id, field_id) DO UPDATE SET
-         value = EXCLUDED.value,
-         updated_at = NOW()`,
-      [listingId, fieldId, normalizedValue],
-    );
+    rowMap.set(fieldId, { fieldId, value: normalizedValue });
   }
+
+  const rows = Array.from(rowMap.values());
+  if (!rows.length) return;
+
+  const values = [];
+  const placeholders = rows.map((row, index) => {
+    const base = index * 2 + 2;
+    values.push(row.fieldId, row.value);
+    return `($${base}::uuid, $${base + 1}::text)`;
+  });
+
+  await client.query(
+    `INSERT INTO listing_field_values (listing_id, field_id, value)
+     SELECT $1::uuid, input.field_id, input.value
+     FROM (VALUES ${placeholders.join(',')}) AS input(field_id, value)
+     JOIN custom_fields f ON f.id = input.field_id AND f.is_active = TRUE
+     ON CONFLICT (listing_id, field_id) DO UPDATE SET
+       value = EXCLUDED.value,
+       updated_at = NOW()`,
+    [listingId, ...values],
+  );
 };
 
 module.exports = {

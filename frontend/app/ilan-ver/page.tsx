@@ -94,7 +94,7 @@ const MAX_IMAGE_COUNT = 10
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024
 const IMAGE_UPLOAD_TIMEOUT_MS = 45000
 const IMAGE_UPLOAD_RETRIES = 1
-const IMAGE_UPLOAD_PARALLEL_LIMIT = 5
+const IMAGE_UPLOAD_PARALLEL_LIMIT = 2
 const IMAGE_CLIENT_MAX_DIMENSION = 1920
 const IMAGE_CLIENT_JPEG_QUALITY = 0.78
 const IMAGE_CLIENT_OPTIMIZE_MIN_BYTES = 1024 * 1024
@@ -623,6 +623,15 @@ export default function CreateListingPage() {
       toast.error('Ilan yayinlamak icin en az 1 gercek fotograf ekle.')
       return
     }
+    const submitStarted = Date.now()
+    const perf = (step: string, started = submitStarted, extra: Record<string, any> = {}) => {
+      console.info(`[perf] frontend.submit.${step}`, {
+        durationMs: Date.now() - started,
+        totalMs: Date.now() - submitStarted,
+        ...extra,
+      })
+    }
+    console.info('[perf] frontend.submit.start', { fileCount: files.length })
     setSaving(true)
     setUploadProgress(0)
     setSavingLabel('Ilan kaydediliyor...')
@@ -727,7 +736,9 @@ export default function CreateListingPage() {
       }
 
       setSavingLabel('İlan kaydediliyor...')
+      const listingCreateStarted = Date.now()
       const created = await listingsApi.create(payload)
+      perf('listing_create.end', listingCreateStarted)
       const listing = created.data?.data
       if (!listing?.id) {
         throw new Error('İlan oluşturulamadı.')
@@ -805,7 +816,13 @@ export default function CreateListingPage() {
             updateParallelProgress()
 
             setSavingLabel(`Fotoğraflar hızlandırılıyor: ${index + 1}/${files.length}`)
+            const optimizeStarted = Date.now()
             const optimized = await optimizeImageForUpload(file)
+            perf('image_optimize.end', optimizeStarted, {
+              index,
+              originalBytes: file.size,
+              optimizedBytes: optimized.size,
+            })
             fileProgress[index] = Math.max(fileProgress[index], 0.22)
             updateParallelProgress()
 
@@ -826,7 +843,12 @@ export default function CreateListingPage() {
         if (!preparedBatch.length) continue
 
         try {
+          const uploadStarted = Date.now()
           const rows = await uploadPreparedBatch(preparedBatch.map(({ file, index }) => ({ file, index })))
+          perf('image_upload_batch.end', uploadStarted, {
+            batchSize: preparedBatch.length,
+            uploaded: rows.length,
+          })
           uploadedImages.push(...rows)
         } catch (uploadErr: any) {
           preparedBatch.forEach(({ index, originalName }) => {
@@ -852,6 +874,11 @@ export default function CreateListingPage() {
       setUploadProgress(100)
       finalizeUi()
       router.push(targetUrl)
+      perf('end', submitStarted, {
+        listingId: listing.id,
+        uploadedImages: uploadedImages.length,
+        failedUploads: failedUploads.length,
+      })
       return
     } catch (err: any) {
       if (err?.response?.status === 401) {
@@ -863,6 +890,7 @@ export default function CreateListingPage() {
       }
 
       toast.error(err?.response?.data?.message || err?.message || 'İlan oluşturulamadı.')
+      perf('error', submitStarted, { message: err?.message || 'unknown' })
     } finally {
       finalizeUi()
     }

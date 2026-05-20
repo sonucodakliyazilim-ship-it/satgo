@@ -6,6 +6,26 @@ const { insertListingImages } = require('./upload.controller');
 // ── Helpers ───────────────────────────────────────────────────
 
 const LISTINGS_PER_PAGE = 20;
+const CUSTOM_FIELD_SCHEMA_ENSURE_ON_REQUEST = process.env.CUSTOM_FIELD_SCHEMA_ENSURE === 'true';
+
+const perfStart = (scope, step, requestStart, extra = {}) => {
+  console.log(`[perf] ${scope}.${step}.start`, {
+    totalMs: Date.now() - requestStart,
+    ...extra,
+  });
+  return Date.now();
+};
+
+const perfEnd = (scope, step, started, requestStart, extra = {}) => {
+  console.log(`[perf] ${scope}.${step}.end`, {
+    durationMs: Date.now() - started,
+    totalMs: Date.now() - requestStart,
+    ...extra,
+  });
+};
+
+const ensureCustomFieldSchemaForRequest = () =>
+  CUSTOM_FIELD_SCHEMA_ENSURE_ON_REQUEST ? ensureCustomFieldTables() : Promise.resolve();
 
 const cleanStringArray = (value) => {
   if (!Array.isArray(value)) return [];
@@ -328,11 +348,9 @@ const getListing = async (req, res, next) => {
 // POST /api/listings
 const createListing = async (req, res, next) => {
   const startTime = Date.now();
-  const logMsg = (stage, extra = {}) => {
-    console.log(`[createListing-${stage}] ${Date.now() - startTime}ms`, extra);
-  };
+  const scope = 'listing.create';
+  console.log(`[perf] ${scope}.start`, { userId: req.user.id, title: req.body.title });
   try {
-    logMsg('start', { userId: req.user.id, title: req.body.title });
     const {
       category_id, sub_category_id, title, description, price, price_negotiable,
       condition, city, district, neighborhood, latitude, longitude,
@@ -351,25 +369,30 @@ const createListing = async (req, res, next) => {
     const hasCustomFields = Array.isArray(custom_fields) && custom_fields.length > 0;
     let canSaveCustomFields = hasCustomFields;
     if (hasCustomFields) {
+      const schemaStart = perfStart(scope, 'custom_fields_schema', startTime, { enabled: CUSTOM_FIELD_SCHEMA_ENSURE_ON_REQUEST });
       try {
-        await ensureCustomFieldTables();
+        await ensureCustomFieldSchemaForRequest();
+        perfEnd(scope, 'custom_fields_schema', schemaStart, startTime);
       } catch (schemaErr) {
         canSaveCustomFields = false;
+        perfEnd(scope, 'custom_fields_schema', schemaStart, startTime, { skipped: true, error: schemaErr.message });
         console.warn('[listings] custom fields skipped:', schemaErr.message);
       }
     }
 
-    logMsg('pre-tx');
+    const transactionStart = perfStart(scope, 'transaction', startTime);
     const result = await withTransaction(async (client) => {
-      logMsg('tx-start');
-      // Create listing
+      const listingInsertStart = perfStart(scope, 'db_insert', startTime);
       const { rows } = await client.query(
         `INSERT INTO listings
           (user_id, category_id, sub_category_id, title, description, price,
            price_negotiable, condition, city, district, neighborhood, latitude, longitude,
            hierarchy_group, hierarchy_path, hierarchy_labels, status, approved_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'active',NOW())
-         RETURNING *`,
+         RETURNING id, user_id, category_id, sub_category_id, title, description, price,
+                   price_negotiable, condition, city, district, neighborhood, latitude, longitude,
+                   hierarchy_group, hierarchy_path, hierarchy_labels, status, approved_at,
+                   created_at, updated_at`,
         [
           req.user.id, effectiveCategoryId, compatibilitySubCategoryId,
           title, description || null, price || null,
@@ -380,9 +403,10 @@ const createListing = async (req, res, next) => {
         ]
       );
       const listing = rows[0];
+      perfEnd(scope, 'db_insert', listingInsertStart, startTime, { listingId: listing.id });
 
-      // Category-specific details
       if (vehicle_details) {
+        const detailsStart = perfStart(scope, 'vehicle_details_insert', startTime, { listingId: listing.id });
         const v = vehicle_details;
         await client.query(
           `INSERT INTO vehicle_details
@@ -403,9 +427,11 @@ const createListing = async (req, res, next) => {
            v.chassis_last6 || null, v.legal_brand || null, v.commercial_name || null,
            v.legal_model_year || null]
         );
+        perfEnd(scope, 'vehicle_details_insert', detailsStart, startTime, { listingId: listing.id });
       }
 
       if (motorcycle_details) {
+        const detailsStart = perfStart(scope, 'motorcycle_details_insert', startTime, { listingId: listing.id });
         const m = motorcycle_details;
         await client.query(
           `INSERT INTO motorcycle_details
@@ -415,9 +441,11 @@ const createListing = async (req, res, next) => {
            m.license_class || null, m.color || null, m.condition_detail || null, m.trade_in || false,
            m.series || null, m.package_name || null, m.trim_name || null]
         );
+        perfEnd(scope, 'motorcycle_details_insert', detailsStart, startTime, { listingId: listing.id });
       }
 
       if (real_estate_details) {
+        const detailsStart = perfStart(scope, 'real_estate_details_insert', startTime, { listingId: listing.id });
         const r = real_estate_details;
         await client.query(
           `INSERT INTO real_estate_details
@@ -429,32 +457,36 @@ const createListing = async (req, res, next) => {
            r.is_furnished || false, r.has_balcony || false, r.has_parking || false,
            r.has_elevator || false, r.monthly_dues || null, r.deposit || null, r.deed_type || null]
         );
+        perfEnd(scope, 'real_estate_details_insert', detailsStart, startTime, { listingId: listing.id });
       }
 
-      // Custom fields (category-dependent)
       if (canSaveCustomFields) {
+        const customFieldStart = perfStart(scope, 'custom_fields_save', startTime, { listingId: listing.id, count: custom_fields.length });
         await upsertListingCustomFields(client, listing.id, custom_fields);
+        perfEnd(scope, 'custom_fields_save', customFieldStart, startTime, { listingId: listing.id, count: custom_fields.length });
       }
 
-      // Update user listing count
-      logMsg('update-user');
+      const userUpdateStart = perfStart(scope, 'user_listing_count_update', startTime, { listingId: listing.id });
       await client.query(
         'UPDATE users SET listing_count = listing_count + 1 WHERE id = $1',
         [req.user.id]
       );
-      logMsg('tx-done');
+      perfEnd(scope, 'user_listing_count_update', userUpdateStart, startTime, { listingId: listing.id });
 
       return listing;
     });
+    perfEnd(scope, 'transaction', transactionStart, startTime, { listingId: result.id });
 
+    const responseStart = perfStart(scope, 'response_send', startTime, { listingId: result.id });
     res.status(201).json({
       success: true,
       message: 'İlanınız yayına alındı.',
       data: result,
     });
-    logMsg('response-sent');
+    perfEnd(scope, 'response_send', responseStart, startTime, { listingId: result.id });
+    console.log(`[perf] ${scope}.end`, { listingId: result.id, totalMs: Date.now() - startTime });
   } catch (err) {
-    logMsg('error', { msg: err.message });
+    console.log(`[perf] ${scope}.error`, { totalMs: Date.now() - startTime, message: err.message });
     next(err);
   }
 };

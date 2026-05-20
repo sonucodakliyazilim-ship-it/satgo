@@ -7,7 +7,7 @@ const { query, withTransaction } = require('../config/database');
 
 const MAX_LISTING_FILE_SIZE = 15 * 1024 * 1024;
 const MAX_FILES_PER_LISTING = 10;
-const IMAGE_PROCESS_CONCURRENCY = 5;
+const IMAGE_PROCESS_CONCURRENCY = Number(process.env.IMAGE_PROCESS_CONCURRENCY || 2);
 const IMAGE_MAX_DIMENSION = 1920;
 const IMAGE_OUTPUT_QUALITY = Number(process.env.LISTING_IMAGE_QUALITY || 78);
 const IMAGE_REENCODE_MIN_BYTES = 1024 * 1024;
@@ -42,6 +42,22 @@ const uploadWarn = (step, details = {}) => {
   console.warn(`[upload] ${step}`, {
     ...details,
     at: new Date().toISOString(),
+  });
+};
+
+const uploadPerfStart = (step, requestStart = Date.now(), details = {}) => {
+  console.log(`[perf] upload.${step}.start`, {
+    totalMs: Date.now() - requestStart,
+    ...details,
+  });
+  return Date.now();
+};
+
+const uploadPerfEnd = (step, started, requestStart = started, details = {}) => {
+  console.log(`[perf] upload.${step}.end`, {
+    durationMs: Date.now() - started,
+    totalMs: Date.now() - requestStart,
+    ...details,
   });
 };
 
@@ -200,7 +216,17 @@ const uploadMiddleware = (fieldName, maxCount) => (req, res, next) => {
   });
   const handler = upload.array(fieldName, maxCount);
   const started = Date.now();
+  console.log('[perf] upload.multer_parse.start', {
+    fieldName,
+    maxCount,
+    contentLength: req.headers['content-length'],
+  });
   handler(req, res, (err) => {
+    console.log(`[perf] upload.${err ? 'multer_parse_error' : 'multer_parse'}.end`, {
+      durationMs: Date.now() - started,
+      fileCount: (req.files || []).length,
+      error: err ? err.message : null,
+    });
     uploadLog(err ? 'multer.parse.error' : 'multer.parse.end', {
       fieldName,
       error: err ? err.message : null,
@@ -233,6 +259,23 @@ const processImageBuffer = async (file, index) => {
     ext: extensionByMime[mime] || path.extname(file.originalname).toLowerCase() || '.jpg',
     optimized: false,
   };
+  const sharpPerf = uploadPerfStart('sharp_process', started, {
+    index,
+    originalName: file.originalname,
+    mime,
+    bytes: fileBuffer.length,
+  });
+
+  if (!animated && ['image/jpeg', 'image/jpg', 'image/pjpeg'].includes(mime) && fileBuffer.length < IMAGE_REENCODE_MIN_BYTES) {
+    uploadPerfEnd('sharp_process', sharpPerf, started, {
+      index,
+      originalName: file.originalname,
+      skipped: true,
+      reason: 'small-jpeg',
+      outputBytes: fileBuffer.length,
+    });
+    return originalResult;
+  }
 
   uploadLog('sharp.metadata.start', {
     index,
@@ -271,6 +314,13 @@ const processImageBuffer = async (file, index) => {
         originalName: file.originalname,
         reason: 'inside-limit',
         maxDimension: IMAGE_MAX_DIMENSION,
+      });
+      uploadPerfEnd('sharp_process', sharpPerf, started, {
+        index,
+        originalName: file.originalname,
+        skipped: true,
+        reason: 'inside-limit',
+        outputBytes: fileBuffer.length,
       });
       return originalResult;
     }
@@ -313,9 +363,23 @@ const processImageBuffer = async (file, index) => {
         originalBytes: fileBuffer.length,
         optimizedBytes: optimized.length,
       });
+      uploadPerfEnd('sharp_process', sharpPerf, started, {
+        index,
+        originalName: file.originalname,
+        keptOriginal: true,
+        originalBytes: fileBuffer.length,
+        outputBytes: fileBuffer.length,
+      });
       return originalResult;
     }
 
+    uploadPerfEnd('sharp_process', sharpPerf, started, {
+      index,
+      originalName: file.originalname,
+      optimized: true,
+      originalBytes: fileBuffer.length,
+      outputBytes: optimized.length,
+    });
     return {
       buffer: optimized,
       mimeType: 'image/jpeg',
@@ -328,6 +392,12 @@ const processImageBuffer = async (file, index) => {
       originalName: file.originalname,
       message: err.message,
       durationMs: Date.now() - started,
+    });
+    uploadPerfEnd('sharp_process', sharpPerf, started, {
+      index,
+      originalName: file.originalname,
+      error: err.message,
+      outputBytes: fileBuffer.length,
     });
     return originalResult;
   }
@@ -443,7 +513,12 @@ const runInBatches = async (items, limit, worker, step) => {
 const insertListingImages = async ({ listingId, files, user }) => {
   const startTime = Date.now();
   uploadLog('insert.start', { listingId, fileCount: files?.length || 0, userId: user.id });
+  const schemaStarted = uploadPerfStart('schema_ensure', startTime, {
+    listingId,
+    enabled: process.env.UPLOAD_SCHEMA_ENSURE === 'true',
+  });
   await ensureUploadSchemaForRequest();
+  uploadPerfEnd('schema_ensure', schemaStarted, startTime, { listingId });
   uploadLog('schema.ensure.end', { listingId });
 
   if (!files || files.length === 0) {
@@ -454,12 +529,16 @@ const insertListingImages = async ({ listingId, files, user }) => {
   }
 
   uploadLog('ownership.check.start', { listingId, userId: user.id });
+  const ownershipStarted = uploadPerfStart('ownership_check', startTime, { listingId, userId: user.id });
   await assertListingOwnership({ query }, listingId, user);
+  uploadPerfEnd('ownership_check', ownershipStarted, startTime, { listingId, userId: user.id });
   uploadLog('ownership.check.end', { listingId, userId: user.id });
 
   uploadLog('count.check.start', { listingId, incoming: files.length });
+  const countStarted = uploadPerfStart('image_count_check', startTime, { listingId, incoming: files.length });
   const existing = await query('SELECT COUNT(*) FROM listing_images WHERE listing_id = $1', [listingId]);
   const existingCount = parseInt(existing.rows[0].count, 10);
+  uploadPerfEnd('image_count_check', countStarted, startTime, { listingId, existingCount, incoming: files.length });
   uploadLog('count.check.end', { listingId, existingCount, incoming: files.length });
   if (existingCount + files.length > MAX_FILES_PER_LISTING) {
     const err = new Error(`En fazla ${MAX_FILES_PER_LISTING} fotoğraf yükleyebilirsiniz.`);
@@ -477,6 +556,11 @@ const insertListingImages = async ({ listingId, files, user }) => {
       parallelLimit: IMAGE_PROCESS_CONCURRENCY,
       maxDimension: IMAGE_MAX_DIMENSION,
     });
+    const sharpTotalStarted = uploadPerfStart('sharp_total', startTime, {
+      listingId,
+      fileCount: files.length,
+      parallelLimit: IMAGE_PROCESS_CONCURRENCY,
+    });
 
     preparedImages.push(
       ...(await runInBatches(
@@ -486,6 +570,11 @@ const insertListingImages = async ({ listingId, files, user }) => {
         'prepare',
       )),
     );
+    uploadPerfEnd('sharp_total', sharpTotalStarted, startTime, {
+      listingId,
+      preparedCount: preparedImages.length,
+      totalBytes: preparedImages.reduce((sum, image) => sum + image.buffer.length, 0),
+    });
 
     uploadLog('prepare.all.end', {
       listingId,
@@ -493,7 +582,11 @@ const insertListingImages = async ({ listingId, files, user }) => {
       durationMs: Date.now() - startTime,
     });
 
-    return await withTransaction(async (client) => {
+    const dbTransactionStarted = uploadPerfStart('db_transaction', startTime, {
+      listingId,
+      preparedCount: preparedImages.length,
+    });
+    const insertedRows = await withTransaction(async (client) => {
       uploadLog('transaction.start', { listingId, preparedCount: preparedImages.length });
       await assertListingOwnership(client, listingId, user, true);
       uploadLog('transaction.ownership.locked', { listingId, userId: user.id });
@@ -513,55 +606,66 @@ const insertListingImages = async ({ listingId, files, user }) => {
         [listingId],
       );
       const hasPrimary = primary.rows.length > 0;
-      const rows = [];
-
-      for (const [index, prepared] of preparedImages.entries()) {
+      const imageRows = preparedImages.map((prepared, index) => {
         const imageId = crypto.randomUUID();
-        const imageUrl = prepared.storage === 'database'
-          ? `/api/upload/listing-images/${imageId}/file`
-          : prepared.url;
-
-        uploadLog('db.image.insert.start', {
-          listingId,
-          index,
+        return {
+          ...prepared,
           imageId,
-          storage: prepared.storage,
+          imageUrl: prepared.storage === 'database'
+            ? `/api/upload/listing-images/${imageId}/file`
+            : prepared.url,
+          sortOrder: currentCount + index,
           isPrimary: !hasPrimary && index === 0,
+        };
+      });
+
+      const imageInsertStarted = uploadPerfStart('listing_images_insert', startTime, {
+        listingId,
+        count: imageRows.length,
+      });
+      const imageValues = [];
+      const imagePlaceholders = imageRows.map((row, index) => {
+        const base = index * 5 + 1;
+        imageValues.push(row.imageId, listingId, row.imageUrl, row.sortOrder, row.isPrimary);
+        return `($${base},$${base + 1},$${base + 2},$${base + 3},$${base + 4})`;
+      });
+      const insertedImageResult = await client.query(
+        `INSERT INTO listing_images (id, listing_id, image_url, sort_order, is_primary)
+         VALUES ${imagePlaceholders.join(',')}
+         RETURNING id, listing_id, image_url, image_url AS url, sort_order, is_primary, created_at`,
+        imageValues,
+      );
+      uploadPerfEnd('listing_images_insert', imageInsertStarted, startTime, {
+        listingId,
+        count: insertedImageResult.rows.length,
+      });
+
+      const databaseRows = imageRows.filter((row) => row.storage === 'database');
+      if (databaseRows.length) {
+        const fileInsertStarted = uploadPerfStart('listing_image_files_insert', startTime, {
+          listingId,
+          count: databaseRows.length,
+          totalBytes: databaseRows.reduce((sum, row) => sum + row.buffer.length, 0),
         });
-
-        const insertedImage = await client.query(
-          `INSERT INTO listing_images (id, listing_id, image_url, sort_order, is_primary)
-           VALUES ($1,$2,$3,$4,$5)
-           RETURNING id, listing_id, image_url, image_url AS url, sort_order, is_primary, created_at`,
-          [
-            imageId,
-            listingId,
-            imageUrl,
-            currentCount + index,
-            !hasPrimary && index === 0,
-          ],
+        const fileValues = [];
+        const filePlaceholders = databaseRows.map((row, index) => {
+          const base = index * 4 + 1;
+          fileValues.push(row.imageId, row.mimeType, row.buffer.length, row.buffer);
+          return `($${base},$${base + 1},$${base + 2},$${base + 3})`;
+        });
+        await client.query(
+          `INSERT INTO listing_image_files (image_id, mime_type, byte_size, data)
+           VALUES ${filePlaceholders.join(',')}`,
+          fileValues,
         );
-
-        uploadLog('db.image.insert.end', { listingId, index, imageId });
-
-        if (prepared.storage === 'database') {
-          uploadLog('db.file.insert.start', {
-            listingId,
-            index,
-            imageId,
-            mimeType: prepared.mimeType,
-            bytes: prepared.buffer.length,
-          });
-          await client.query(
-            `INSERT INTO listing_image_files (image_id, mime_type, byte_size, data)
-             VALUES ($1,$2,$3,$4)`,
-            [imageId, prepared.mimeType, prepared.buffer.length, prepared.buffer],
-          );
-          uploadLog('db.file.insert.end', { listingId, index, imageId });
-        }
-
-        rows.push(insertedImage.rows[0]);
+        uploadPerfEnd('listing_image_files_insert', fileInsertStarted, startTime, {
+          listingId,
+          count: databaseRows.length,
+        });
       }
+
+      const insertedById = new Map(insertedImageResult.rows.map((row) => [row.id, row]));
+      const rows = imageRows.map((row) => insertedById.get(row.imageId)).filter(Boolean);
 
       uploadLog('transaction.end', {
         listingId,
@@ -571,6 +675,11 @@ const insertListingImages = async ({ listingId, files, user }) => {
 
       return rows;
     });
+    uploadPerfEnd('db_transaction', dbTransactionStarted, startTime, {
+      listingId,
+      insertedCount: insertedRows.length,
+    });
+    return insertedRows;
   } catch (err) {
     uploadWarn('insert.cleanup.start', { listingId, preparedCount: preparedImages.length, message: err.message });
     await Promise.all(preparedImages.map(async (image) => {
@@ -603,18 +712,41 @@ const uploadListingImages = async (req, res, next) => {
     });
   });
   uploadLog('request.start', { listingId: req.params.listingId, fileCount: (req.files || []).length, userId: req.user?.id });
+  const imageUploadStarted = uploadPerfStart('image_upload', requestStart, {
+    listingId: req.params.listingId,
+    fileCount: (req.files || []).length,
+    userId: req.user?.id,
+  });
   try {
     const inserted = await insertListingImages({
       listingId: req.params.listingId,
       files: req.files,
       user: req.user,
     });
+    uploadPerfEnd('image_upload', imageUploadStarted, requestStart, {
+      listingId: req.params.listingId,
+      inserted: inserted.length,
+    });
 
     uploadLog('request.end', { listingId: req.params.listingId, inserted: inserted.length, durationMs: Date.now() - requestStart });
     uploadLog('response.send', { listingId: req.params.listingId, inserted: inserted.length, statusCode: 200 });
 
+    const responseStarted = uploadPerfStart('response_send', requestStart, {
+      listingId: req.params.listingId,
+      inserted: inserted.length,
+      statusCode: 200,
+    });
     res.json({ success: true, message: `${inserted.length} fotoğraf yüklendi.`, data: inserted });
+    uploadPerfEnd('response_send', responseStarted, requestStart, {
+      listingId: req.params.listingId,
+      inserted: inserted.length,
+      statusCode: 200,
+    });
   } catch (err) {
+    uploadPerfEnd('image_upload', imageUploadStarted, requestStart, {
+      listingId: req.params.listingId,
+      error: err.message,
+    });
     uploadWarn('request.error', { listingId: req.params.listingId, message: err.message, durationMs: Date.now() - requestStart });
     next(err);
   }
