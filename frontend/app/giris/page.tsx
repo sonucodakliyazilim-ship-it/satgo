@@ -2,10 +2,9 @@
 
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Suspense, useEffect, useState } from 'react'
+import { Suspense, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/lib/store'
-import { API_URL } from '@/lib/config'
 
 export default function GirisPage() {
   return (
@@ -17,16 +16,13 @@ export default function GirisPage() {
 
 function GirisContent() {
   const [tab, setTab] = useState<'login' | 'register'>('login')
-  const { login, register, loading, fetchMe } = useAuthStore()
+  const { login, register, loading } = useAuthStore()
   const router = useRouter()
   const searchParams = useSearchParams()
   const [form, setForm] = useState({ name: '', email: '', password: '', phone: '' })
 
   const rawNextPath = searchParams.get('next') || '/'
   const nextPath = rawNextPath.startsWith('/') && !rawNextPath.startsWith('//') ? rawNextPath : '/'
-  const oauthRedirect = `/giris?oauth=success&next=${encodeURIComponent(nextPath)}`
-  const googleOAuthUrl = `${API_URL}/auth/oauth/google/start?redirect=${encodeURIComponent(oauthRedirect)}`
-  const githubOAuthUrl = `${API_URL}/auth/oauth/github/start?redirect=${encodeURIComponent(oauthRedirect)}`
 
   const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((current) => ({ ...current, [key]: e.target.value }))
@@ -37,35 +33,21 @@ function GirisContent() {
     if (fromValidation) return fromValidation
     if (fromBody) return fromBody
     const code = err?.code
-    if (code === 'ECONNABORTED' || err?.message?.includes?.('timeout'))
+    if (code === 'ECONNABORTED' || err?.message?.includes?.('timeout')) {
       return 'Sunucuya bağlanırken zaman aşımı oluştu. İnternet bağlantınızı kontrol edin.'
-    if (err?.message === 'Network Error')
+    }
+    if (err?.message === 'Network Error') {
       return 'Ağ hatası: API adresine erişilemiyor. Tarayıcı konsolunda engellenen istek var mı kontrol edin.'
+    }
     return fallback
   }
-
-  useEffect(() => {
-    const oauth = searchParams.get('oauth')
-    if (!oauth) return
-
-    if (oauth === 'success') {
-      fetchMe().finally(() => {
-        toast.success('Giriş başarılı')
-        router.replace(nextPath)
-      })
-      return
-    }
-
-    toast.error(searchParams.get('message') || 'Sosyal giriş tamamlanamadı')
-    router.replace('/giris')
-  }, [fetchMe, nextPath, router, searchParams])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
       await login(form.email.trim(), form.password)
       toast.success('Giriş başarılı')
-      router.push('/')
+      router.push(nextPath)
     } catch (err: any) {
       toast.error(getErrorMessage(err, 'Giriş başarısız'))
     }
@@ -81,7 +63,7 @@ function GirisContent() {
         phone: form.phone.trim(),
       })
       toast.success('Kayıt başarılı')
-      router.push('/')
+      router.push(nextPath)
     } catch (err: any) {
       toast.error(getErrorMessage(err, 'Kayıt başarısız'))
     }
@@ -120,29 +102,6 @@ function GirisContent() {
           </div>
 
           <div className="p-6">
-            <div className="grid gap-3">
-              <a
-                href={googleOAuthUrl}
-                className="flex h-11 items-center justify-center gap-3 rounded-lg border border-gray-200 bg-white text-sm font-black text-gray-800 hover:border-brand/60 hover:bg-gray-50"
-              >
-                <span className="grid h-6 w-6 place-items-center rounded-full bg-white text-base font-black text-[#4285F4] shadow-sm">G</span>
-                Google ile giriş
-              </a>
-              <a
-                href={githubOAuthUrl}
-                className="flex h-11 items-center justify-center gap-3 rounded-lg border border-gray-200 bg-black text-sm font-black text-white hover:bg-gray-900"
-              >
-                <span className="grid h-6 w-6 place-items-center rounded-full bg-white text-base font-black shadow-sm">GH</span>
-                GitHub ile giriş
-              </a>
-            </div>
-
-            <div className="my-5 flex items-center gap-3 text-xs font-bold uppercase text-gray-400">
-              <span className="h-px flex-1 bg-gray-100" />
-              veya
-              <span className="h-px flex-1 bg-gray-100" />
-            </div>
-
             {tab === 'login' ? (
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
