@@ -33,6 +33,24 @@ const saveRefreshToken = async (userId, token) => {
   );
 };
 
+const AUTH_SCHEMA_ENSURE_ON_REQUEST = process.env.AUTH_SCHEMA_ENSURE === 'true';
+
+const authPerfStart = (scope, step, requestStart, extra = {}) => {
+  console.log(`[perf] auth.${scope}.${step}.start`, {
+    totalMs: Date.now() - requestStart,
+    ...extra,
+  });
+  return Date.now();
+};
+
+const authPerfEnd = (scope, step, started, requestStart, extra = {}) => {
+  console.log(`[perf] auth.${scope}.${step}.end`, {
+    durationMs: Date.now() - started,
+    totalMs: Date.now() - requestStart,
+    ...extra,
+  });
+};
+
 const getFrontendBaseUrl = () =>
   (
     process.env.FRONTEND_URL ||
@@ -124,6 +142,9 @@ const ensureAuthSchema = () => {
 
   return authSchemaPromise;
 };
+
+const ensureAuthSchemaForRequest = () =>
+  AUTH_SCHEMA_ENSURE_ON_REQUEST ? ensureAuthSchema() : Promise.resolve();
 
 const OAUTH_STATE_COOKIE = 'satgo_oauth_state';
 const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000;
@@ -499,7 +520,7 @@ const findOrCreateOAuthUser = async (provider, profile) => {
 
   const normalizedEmail = profile.email ? String(profile.email).trim().toLowerCase() : null;
 
-  await ensureAuthSchema();
+  await ensureAuthSchemaForRequest();
   await ensureOAuthSchema();
 
   return withTransaction(async (client) => {
@@ -660,8 +681,8 @@ const handleOAuthCallback = async (req, res) => {
 // POST /api/auth/register
 const register = async (req, res, next) => {
   try {
-    console.log('[register] start body=', JSON.stringify(req.body), 'ct=', req.headers['content-type']);
-    await ensureAuthSchema();
+    console.log('[perf] auth.register.start', { email: req.body?.email, contentType: req.headers['content-type'] });
+    await ensureAuthSchemaForRequest();
     const { name, email, password, phone, city } = req.body;
     console.log('[register] fields name=', name, 'email=', email, 'phone=', phone);
 
@@ -708,16 +729,27 @@ const register = async (req, res, next) => {
 
 // POST /api/auth/login
 const login = async (req, res, next) => {
+  const requestStart = Date.now();
+  const scope = 'login';
   try {
-    console.log('[login] start body=', JSON.stringify(req.body));
-    await ensureAuthSchema();
+    console.log('[perf] auth.login.start', { email: req.body?.email });
+    const schemaStarted = authPerfStart(scope, 'schema_ensure', requestStart, { enabled: AUTH_SCHEMA_ENSURE_ON_REQUEST });
+    await ensureAuthSchemaForRequest();
+    authPerfEnd(scope, 'schema_ensure', schemaStarted, requestStart);
     const { email, password } = req.body;
     console.log('[login] email=', email);
 
+    const lookupStarted = authPerfStart(scope, 'user_lookup', requestStart, { email });
     const { rows } = await query(
-      'SELECT * FROM users WHERE email = $1',
+      `SELECT id, name, email, phone, role, status, avatar_url, bio, city, district,
+              email_verified, phone_verified, rating_avg, rating_count, listing_count,
+              created_at, password_hash
+       FROM users
+       WHERE email = $1
+       LIMIT 1`,
       [email]
     );
+    authPerfEnd(scope, 'user_lookup', lookupStarted, requestStart, { found: rows.length });
     console.log('[login] query done found=', rows.length);
 
     if (!rows.length) {
@@ -732,27 +764,39 @@ const login = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Hesabınız engellenmiştir.' });
     }
 
+    const passwordStarted = authPerfStart(scope, 'password_compare', requestStart, { userId: user.id });
     const valid = await bcrypt.compare(password, user.password_hash);
+    authPerfEnd(scope, 'password_compare', passwordStarted, requestStart, { userId: user.id, valid });
     console.log('[login] password valid=', valid);
     if (!valid) {
       console.log('[login] password mismatch');
       return res.status(401).json({ success: false, message: 'E-posta veya şifre hatalı.' });
     }
 
+    const tokenGenerateStarted = authPerfStart(scope, 'token_generate', requestStart, { userId: user.id });
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
-    await saveAccessToken(user.id, accessToken);
-    await saveRefreshToken(user.id, refreshToken);
-    await query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+    authPerfEnd(scope, 'token_generate', tokenGenerateStarted, requestStart, { userId: user.id });
+
+    const tokenStoreStarted = authPerfStart(scope, 'token_store', requestStart, { userId: user.id });
+    await Promise.all([
+      saveAccessToken(user.id, accessToken),
+      saveRefreshToken(user.id, refreshToken),
+      query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]),
+    ]);
+    authPerfEnd(scope, 'token_store', tokenStoreStarted, requestStart, { userId: user.id });
     setTokenCookies(res, accessToken, refreshToken);
     delete user.password_hash;
 
-    console.log('[login] success user=', user.id);
-    return res.json({
+    const responseStarted = authPerfStart(scope, 'response_send', requestStart, { userId: user.id });
+    res.json({
       success: true,
       data: { user, accessToken, refreshToken },
     });
+    authPerfEnd(scope, 'response_send', responseStarted, requestStart, { userId: user.id });
+    console.log('[perf] auth.login.end', { userId: user.id, totalMs: Date.now() - requestStart });
+    return;
   } catch (err) {
-    console.log('[login] error', err.message);
+    console.log('[perf] auth.login.error', { totalMs: Date.now() - requestStart, message: err.message });
     next(err);
   }
 };
@@ -760,7 +804,7 @@ const login = async (req, res, next) => {
 // POST /api/auth/refresh
 const refresh = async (req, res, next) => {
   try {
-    await ensureAuthSchema();
+    await ensureAuthSchemaForRequest();
     const refreshToken = getRefreshTokenFromRequest(req);
     if (!refreshToken) {
       return res.status(400).json({ success: false, message: 'Refresh token gerekli.' });
@@ -802,7 +846,7 @@ const refresh = async (req, res, next) => {
 // POST /api/auth/logout
 const logout = async (req, res, next) => {
   try {
-    await ensureAuthSchema();
+    await ensureAuthSchemaForRequest();
     const refreshToken = getRefreshTokenFromRequest(req);
     if (refreshToken) {
       await query('DELETE FROM refresh_tokens WHERE token = $1', [refreshToken]);
@@ -817,7 +861,7 @@ const logout = async (req, res, next) => {
 // POST /api/auth/forgot-password
 const forgotPassword = async (req, res, next) => {
   try {
-    await ensureAuthSchema();
+    await ensureAuthSchemaForRequest();
     const { email } = req.body;
     const { rows } = await query('SELECT id FROM users WHERE email = $1', [email]);
 
@@ -854,7 +898,7 @@ const forgotPassword = async (req, res, next) => {
 // POST /api/auth/reset-password
 const resetPassword = async (req, res, next) => {
   try {
-    await ensureAuthSchema();
+    await ensureAuthSchemaForRequest();
     const { token, password } = req.body;
 
     const { rows } = await query(
@@ -884,7 +928,7 @@ const resetPassword = async (req, res, next) => {
 
 const changePassword = async (req, res, next) => {
   try {
-    await ensureAuthSchema();
+    await ensureAuthSchemaForRequest();
     const { currentPassword, password } = req.body;
     const { rows } = await query('SELECT id, password_hash FROM users WHERE id = $1', [req.user.id]);
     if (!rows.length) return res.status(404).json({ success: false, message: 'Kullanıcı bulunamadı.' });
