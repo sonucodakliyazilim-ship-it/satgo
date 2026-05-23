@@ -95,6 +95,14 @@ const flattenCategories = (items: any[] = [], depth = 0, parentName = ''): any[]
     ...flattenCategories(category.sub_categories || [], depth + 1, category.name),
   ])
 
+const removeCategoriesFromTree = (items: any[] = [], ids: Set<string>): any[] =>
+  items
+    .filter((category) => !ids.has(String(category.id)))
+    .map((category) => ({
+      ...category,
+      sub_categories: removeCategoriesFromTree(category.sub_categories || [], ids),
+    }))
+
 export default function AdminPage() {
   const router = useRouter()
   const { user } = useAuthStore()
@@ -369,13 +377,14 @@ export default function AdminPage() {
   }
 
   const deleteCategory = async (id: string | number) => {
-    if (!window.confirm('Bu kategori silinsin mi? Alt kategoriler de pasife alınır.')) return
+    if (!window.confirm('Bu kategori silinsin mi? Alt kategoriler de silinir.')) return
     try {
-      await categoriesApi.delete(id)
+      const res = await categoriesApi.delete(id)
+      const deletedIds = new Set<string>((res.data?.data?.deleted_ids || [id]).map((item: any) => String(item)))
+      setCategories((current) => removeCategoriesFromTree(current, deletedIds))
       toast.success('Kategori silindi')
       if (editingCategoryId === String(id)) resetCategoryForm()
       window.dispatchEvent(new Event('satgo:categories-updated'))
-      load()
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Kategori silinemedi')
     }

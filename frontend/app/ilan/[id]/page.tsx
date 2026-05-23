@@ -160,13 +160,13 @@ export default function ListingDetailPage() {
       <div className="grid md:grid-cols-3 gap-6">
         <div className="md:col-span-2 space-y-4">
           <div className="card overflow-hidden">
-            <div className="relative aspect-[4/3] bg-gray-100">
+            <div className="relative aspect-[4/3] bg-gray-100 sm:aspect-[16/11]">
               {imgUrl && !imageFailed ? (
                 <img
                   src={imgUrl}
                   alt={listing.title}
                   onError={() => setImageFailed(true)}
-                  className="h-full w-full object-cover"
+                  className="h-full w-full object-contain sm:object-cover"
                 />
               ) : (
                 <img src="/satgo-logo.jpeg" alt="" className="h-full w-full object-contain p-16 opacity-70" />

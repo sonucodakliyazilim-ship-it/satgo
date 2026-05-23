@@ -98,6 +98,18 @@ const preventCategoryCache = (res) => {
   res.set('Expires', '0');
 };
 
+let categorySchemaPromise = null;
+const ensureCategorySchema = () => {
+  if (!categorySchemaPromise) {
+    categorySchemaPromise = query('ALTER TABLE categories ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ')
+      .catch((err) => {
+        categorySchemaPromise = null;
+        throw err;
+      });
+  }
+  return categorySchemaPromise;
+};
+
 const parseCsvLine = (line) => {
   const result = [];
   let value = '';
@@ -124,6 +136,7 @@ const parseCsvLine = (line) => {
 };
 
 const upsertCategory = async ({ parentId = null, name, slug, icon = null, sortOrder = 0 }) => {
+  await ensureCategorySchema();
   const cleanName = String(name || '').trim();
   const normalizedSlug = makeSlug(slug || cleanName);
   if (!cleanName || !normalizedSlug) return null;
@@ -136,7 +149,8 @@ const upsertCategory = async ({ parentId = null, name, slug, icon = null, sortOr
        name = EXCLUDED.name,
        icon = COALESCE(EXCLUDED.icon, categories.icon),
        sort_order = EXCLUDED.sort_order,
-       is_active = TRUE
+       is_active = TRUE,
+       deleted_at = NULL
      RETURNING *`,
     [parentId, cleanName, normalizedSlug, icon || null, Number(sortOrder || 0)],
   );
@@ -183,6 +197,7 @@ let defaultCategoriesReady = false;
 
 const ensureDefaultCategories = async () => {
   if (defaultCategoriesReady) return;
+  await ensureCategorySchema();
 
   for (const category of DEFAULT_CATEGORIES) {
     await query(
@@ -192,7 +207,8 @@ const ensureDefaultCategories = async () => {
          parent_id = NULL,
          name = EXCLUDED.name,
          icon = EXCLUDED.icon,
-         sort_order = EXCLUDED.sort_order`,
+         sort_order = EXCLUDED.sort_order,
+         deleted_at = NULL`,
       [category.name, category.slug, category.icon, category.sort_order]
     );
   }
@@ -206,7 +222,8 @@ const ensureDefaultCategories = async () => {
        ON CONFLICT (slug) DO UPDATE SET
          parent_id = EXCLUDED.parent_id,
          name = EXCLUDED.name,
-         sort_order = EXCLUDED.sort_order`,
+         sort_order = EXCLUDED.sort_order,
+         deleted_at = NULL`,
       [category.parent_slug, category.name, category.slug, category.sort_order]
     );
   }
@@ -218,6 +235,7 @@ const ensureDefaultCategories = async () => {
 const getCategories = async (req, res, next) => {
   try {
     preventCategoryCache(res);
+    await ensureCategorySchema();
     await ensureDefaultCategories();
     const startTime = Date.now();
     const includeInactive = req.query.include_inactive === 'true' || req.query.includeInactive === 'true';
@@ -226,7 +244,8 @@ const getCategories = async (req, res, next) => {
     const { rows: allCategories } = await query(
       `SELECT id, parent_id, name, slug, icon, sort_order, is_active
        FROM categories
-       WHERE $1::boolean = TRUE OR is_active = TRUE
+       WHERE deleted_at IS NULL
+         AND ($1::boolean = TRUE OR is_active = TRUE)
        ORDER BY parent_id NULLS FIRST, sort_order ASC, name ASC`,
       [includeInactive],
     );
@@ -262,8 +281,9 @@ const getCategories = async (req, res, next) => {
 // GET /api/categories/:slug
 const getCategory = async (req, res, next) => {
   try {
+    await ensureCategorySchema();
     const { rows } = await query(
-      'SELECT * FROM categories WHERE slug = $1 AND is_active = TRUE',
+      'SELECT * FROM categories WHERE slug = $1 AND is_active = TRUE AND deleted_at IS NULL',
       [req.params.slug]
     );
     if (!rows.length) return res.status(404).json({ success: false, message: 'Kategori bulunamadı.' });
@@ -274,6 +294,7 @@ const getCategory = async (req, res, next) => {
 // POST /api/categories  (admin)
 const createCategory = async (req, res, next) => {
   try {
+    await ensureCategorySchema();
     const { parent_id, name, slug, icon, sort_order, is_active } = req.body;
     const normalizedSlug = makeSlug(slug || name);
     if (!name || !normalizedSlug) {
@@ -288,7 +309,8 @@ const createCategory = async (req, res, next) => {
          name = EXCLUDED.name,
          icon = EXCLUDED.icon,
          sort_order = EXCLUDED.sort_order,
-         is_active = EXCLUDED.is_active
+         is_active = EXCLUDED.is_active,
+         deleted_at = NULL
        RETURNING *`,
       [parent_id || null, name.trim(), normalizedSlug, icon || null, sort_order || 0, is_active !== false]
     );
@@ -299,6 +321,7 @@ const createCategory = async (req, res, next) => {
 // PATCH /api/categories/:id  (admin)
 const updateCategory = async (req, res, next) => {
   try {
+    await ensureCategorySchema();
     const { parent_id, name, slug, icon, sort_order, is_active } = req.body;
     const hasParent = Object.prototype.hasOwnProperty.call(req.body, 'parent_id');
     const normalizedSlug = slug || name ? makeSlug(slug || name) : null;
@@ -334,7 +357,8 @@ const updateCategory = async (req, res, next) => {
          slug        = COALESCE($4, slug),
          icon        = COALESCE($5, icon),
          sort_order  = COALESCE($6, sort_order),
-         is_active   = COALESCE($7, is_active)
+         is_active   = COALESCE($7, is_active),
+         deleted_at  = NULL
        WHERE id = $8 RETURNING *`,
       [hasParent, parent_id || null, name, normalizedSlug, icon, sort_order, is_active, req.params.id]
     );
@@ -346,6 +370,7 @@ const updateCategory = async (req, res, next) => {
 // DELETE /api/categories/:id (admin)
 const deleteCategory = async (req, res, next) => {
   try {
+    await ensureCategorySchema();
     const { rows } = await query(
       `WITH RECURSIVE branch AS (
          SELECT id FROM categories WHERE id = $1
@@ -355,13 +380,18 @@ const deleteCategory = async (req, res, next) => {
          JOIN branch parent ON child.parent_id = parent.id
        )
        UPDATE categories
-       SET is_active = FALSE
+       SET is_active = FALSE,
+           deleted_at = NOW()
        WHERE id IN (SELECT id FROM branch)
-       RETURNING *`,
+       RETURNING id, name, slug`,
       [req.params.id],
     );
     if (!rows.length) return res.status(404).json({ success: false, message: 'Kategori bulunamadi.' });
-    res.json({ success: true, message: 'Kategori silindi.', data: rows });
+    res.json({
+      success: true,
+      message: 'Kategori silindi.',
+      data: { deleted_ids: rows.map((row) => row.id), categories: rows },
+    });
   } catch (err) { next(err); }
 };
 

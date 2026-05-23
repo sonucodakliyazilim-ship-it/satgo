@@ -45,7 +45,15 @@ const requiresSsl = hasExplicitSslSetting
 const pool = new Pool({
   connectionString: databaseUrl,
   ssl: requiresSsl ? { rejectUnauthorized: false } : undefined,
+  max: Number(process.env.PGPOOL_MAX || 10),
+  idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS || 30000),
+  connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 8000),
+  keepAlive: true,
+  statement_timeout: Number(process.env.PG_STATEMENT_TIMEOUT_MS || 20000),
+  query_timeout: Number(process.env.PG_QUERY_TIMEOUT_MS || 20000),
 });
+
+const DB_DEBUG = process.env.DB_DEBUG === 'true';
 
 pool.on('error', (err) => {
   console.error('Unexpected DB pool error:', err.code || err.message);
@@ -89,7 +97,7 @@ const logQueryError = (err, text, params) => {
 const query = async (text, params) => {
   const queryId = ++queryCounter;
   const startTime = Date.now();
-  console.log('[db.query.start]', queryId, compactSql(text), sanitizeParams(params));
+  if (DB_DEBUG) console.log('[db.query.start]', queryId, compactSql(text), sanitizeParams(params));
   try {
     return await pool.query(text, params);
   } catch (err) {
@@ -97,7 +105,8 @@ const query = async (text, params) => {
     console.log('[db.query.error]', queryId, Date.now() - startTime, err.message);
     throw err;
   } finally {
-    console.log('[db.query.end]', queryId, Date.now() - startTime);
+    const durationMs = Date.now() - startTime;
+    if (DB_DEBUG || durationMs > 1000) console.log('[db.query.end]', queryId, durationMs);
   }
 };
 
@@ -109,7 +118,7 @@ const withTransaction = async (callback) => {
   client.query = async (text, params) => {
     const queryId = ++queryCounter;
     const startTime = Date.now();
-    console.log('[db.client.query.start]', queryId, compactSql(text), sanitizeParams(params));
+    if (DB_DEBUG) console.log('[db.client.query.start]', queryId, compactSql(text), sanitizeParams(params));
     try {
       return await originalQuery(text, params);
     } catch (err) {
@@ -117,7 +126,8 @@ const withTransaction = async (callback) => {
       console.log('[db.client.query.error]', queryId, Date.now() - startTime, err.message);
       throw err;
     } finally {
-      console.log('[db.client.query.end]', queryId, Date.now() - startTime);
+      const durationMs = Date.now() - startTime;
+      if (DB_DEBUG || durationMs > 1000) console.log('[db.client.query.end]', queryId, durationMs);
     }
   };
   try {

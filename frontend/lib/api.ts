@@ -177,7 +177,7 @@ api.interceptors.response.use(
 
 export const authApi = {
   register: (d: any) => api.post('/auth/register', d),
-  login: (d: any) => api.post('/auth/login', d),
+  login: (d: any) => api.post('/auth/login', d, { timeout: 30000 }),
   logout: (refreshToken?: string) => api.post('/auth/logout', refreshToken ? { refreshToken } : {}),
   refresh: (refreshToken: string) => api.post('/auth/refresh', { refreshToken }),
   forgotPassword: (email: string) => api.post('/auth/forgot-password', { email }),
