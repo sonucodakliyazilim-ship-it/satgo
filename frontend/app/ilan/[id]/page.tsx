@@ -156,20 +156,20 @@ export default function ListingDetailPage() {
     : []
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-4">
-      <div className="grid md:grid-cols-3 gap-6">
-        <div className="md:col-span-2 space-y-4">
-          <div className="card overflow-hidden">
-            <div className="relative aspect-[4/3] bg-gray-100 sm:aspect-[16/11]">
+    <div className="mx-auto max-w-5xl overflow-x-hidden px-3 py-4 sm:px-4">
+      <div className="grid min-w-0 gap-6 md:grid-cols-3">
+        <div className="min-w-0 space-y-4 md:col-span-2">
+          <div className="card w-full max-w-full overflow-hidden">
+            <div className="relative flex aspect-[4/3] w-full max-w-full items-center justify-center overflow-hidden bg-gray-100 sm:aspect-[16/11]">
               {imgUrl && !imageFailed ? (
                 <img
                   src={imgUrl}
                   alt={listing.title}
                   onError={() => setImageFailed(true)}
-                  className="h-full w-full object-contain sm:object-cover"
+                  className="block h-full max-h-full w-full max-w-full object-contain"
                 />
               ) : (
-                <img src="/satgo-logo.jpeg" alt="" className="h-full w-full object-contain p-16 opacity-70" />
+                <img src="/satgo-logo.jpeg" alt="" className="block h-full max-h-full w-full max-w-full object-contain p-10 opacity-70 sm:p-16" />
               )}
 
               <div className="absolute top-3 left-3 flex gap-1">
@@ -206,7 +206,7 @@ export default function ListingDetailPage() {
             </div>
 
             {images.length > 1 && (
-              <div className="flex gap-2 p-3 overflow-x-auto">
+              <div className="flex max-w-full gap-2 overflow-x-auto overscroll-x-contain p-3">
                 {images.map((im: any, i: number) => {
                   const tUrl = mediaUrl(im.image_url || im.url)
                   return (
@@ -216,11 +216,11 @@ export default function ListingDetailPage() {
                         setImageFailed(false)
                         setImgIdx(i)
                       }}
-                      className={`w-16 h-12 rounded-lg overflow-hidden border-2 shrink-0 transition-colors ${
+                      className={`h-12 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition-colors ${
                         i === imgIdx ? 'border-brand' : 'border-transparent'
                       }`}
                     >
-                      {tUrl ? <img src={tUrl} alt="" className="h-full w-full object-cover" /> : null}
+                      {tUrl ? <img src={tUrl} alt="" className="block h-full w-full object-cover" /> : null}
                     </button>
                   )
                 })}
