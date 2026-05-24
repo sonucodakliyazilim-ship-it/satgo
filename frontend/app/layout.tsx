@@ -4,6 +4,7 @@ import { Toaster } from 'react-hot-toast'
 import Navbar from '@/components/layout/Navbar'
 import BottomNav from '@/components/layout/BottomNav'
 import ClientBootstrap from '@/components/layout/ClientBootstrap'
+import MessageNotifications from '@/components/layout/MessageNotifications'
 
 export const metadata: Metadata = {
   title: 'Satgo - Turkiye ilan platformu',
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="min-h-screen bg-[#F5F4F0] font-sans">
         <ClientBootstrap />
+        <MessageNotifications />
         <Navbar />
         <main className="pb-20 md:pb-0">{children}</main>
         <BottomNav />

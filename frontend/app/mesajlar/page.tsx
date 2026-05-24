@@ -43,6 +43,7 @@ export default function MessagesPage() {
       setText('')
       const { data } = await messagesApi.getMessages(active.id)
       setMessages(data.data)
+      toast.success('Mesaj gönderildi')
     } catch {
       toast.error('Mesaj gönderilemedi')
     }
