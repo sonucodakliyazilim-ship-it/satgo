@@ -232,8 +232,8 @@ export default function Navbar() {
       {categoryOpen && <button aria-label="Kategorileri kapat" className="fixed inset-0 bg-black/25 z-40 cursor-default md:hidden" onClick={() => setCategoryOpen(false)} />}
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex flex-wrap items-center gap-2 py-2 md:h-14 md:flex-nowrap md:gap-3 md:py-0">
-          <Link href="/" className="order-1 flex items-center gap-2 shrink-0 md:order-none" aria-label="SATGO Ana Sayfa">
-            <img src="/satgo-logo.jpeg" alt="SATGO.TR" className="h-10 w-[132px] rounded-md object-cover object-center" />
+          <Link href="/" className="order-1 flex h-10 items-center gap-2 shrink-0 md:order-none" aria-label="SATGO Ana Sayfa">
+            <span className="text-3xl font-black lowercase tracking-tight text-brand leading-none">satgo</span>
           </Link>
 
           <form onSubmit={handleSearch} className="order-3 relative w-full flex-none md:order-none md:flex-1 md:max-w-xl">

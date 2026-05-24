@@ -74,7 +74,7 @@ function GirisContent() {
       <div className="w-full max-w-md">
         <div className="text-center mb-6">
           <Link href="/" className="inline-flex items-center justify-center">
-            <img src="/satgo-logo.jpeg" alt="SATGO.TR" className="h-16 w-48 rounded-lg object-cover object-center" />
+            <span className="text-5xl font-black lowercase tracking-tight text-brand leading-none">satgo</span>
           </Link>
           <p className="text-gray-500 text-sm mt-2">Türkiye'nin ilan platformu</p>
         </div>
