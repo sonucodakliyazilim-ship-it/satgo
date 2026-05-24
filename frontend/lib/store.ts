@@ -157,7 +157,16 @@ export const useAuthStore = create<AuthStore>((set) => ({
   },
 
   fetchMe: async () => {
-    await ensureAccessToken()
+    if (!hasAuthTokens()) {
+      set({ authReady: true })
+      return
+    }
+
+    const token = await ensureAccessToken()
+    if (!token) {
+      set({ authReady: true })
+      return
+    }
 
     try {
       const { data } = await usersApi.getMe()

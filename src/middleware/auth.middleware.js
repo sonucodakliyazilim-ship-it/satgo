@@ -33,7 +33,7 @@ const authenticate = async (req, res, next) => {
 
     // Fetch fresh user data
     const { rows } = await query(
-      `SELECT id, name, email, role, status, avatar_url, city, district, created_at
+      `SELECT id, name, email, role, status, created_at
        FROM users
        WHERE id = $1`,
       [decoded.userId]
@@ -68,7 +68,7 @@ const optionalAuth = async (req, res, next) => {
     }
     const decoded = await verifyAccessToken(token);
     const { rows } = await query(
-      `SELECT id, name, email, role, status, avatar_url, city, district, created_at
+      `SELECT id, name, email, role, status, created_at
        FROM users
        WHERE id = $1`,
       [decoded.userId]

@@ -1,26 +1,19 @@
-'use client'
-
 import './globals.css'
+import type { Metadata } from 'next'
 import { Toaster } from 'react-hot-toast'
-import { useEffect } from 'react'
-import { useAuthStore } from '@/lib/store'
 import Navbar from '@/components/layout/Navbar'
 import BottomNav from '@/components/layout/BottomNav'
+import ClientBootstrap from '@/components/layout/ClientBootstrap'
+
+export const metadata: Metadata = {
+  title: 'Satgo - Turkiye ilan platformu',
+  description: 'Ilan ver, ara, bul. Arac, emlak, elektronik ve daha fazlasi.',
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const hydrateFromClientStorage = useAuthStore((s) => s.hydrateFromClientStorage)
-  const fetchMe = useAuthStore((s) => s.fetchMe)
-
-  useEffect(() => {
-    hydrateFromClientStorage()
-    fetchMe()
-  }, [hydrateFromClientStorage, fetchMe])
-
   return (
     <html lang="tr">
       <head>
-        <title>Satgo - Türkiye&apos;nin İlan Platformu</title>
-        <meta name="description" content="İlan ver, ara, bul. Araç, emlak, elektronik ve daha fazlası." />
         <meta name="satgo-build" content={process.env.NEXT_PUBLIC_APP_BUILD || ''} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -29,7 +22,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
         />
       </head>
-      <body className="bg-[#F5F4F0] font-sans min-h-screen">
+      <body className="min-h-screen bg-[#F5F4F0] font-sans">
+        <ClientBootstrap />
         <Navbar />
         <main className="pb-20 md:pb-0">{children}</main>
         <BottomNav />

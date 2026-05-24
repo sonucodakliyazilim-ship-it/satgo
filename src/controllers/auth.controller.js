@@ -4,7 +4,6 @@ const jwt     = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { query, withTransaction } = require('../config/database');
 const { clearTokenCookies, getRefreshTokenFromRequest, setTokenCookies } = require('../utils/tokenCookies');
-const { saveAccessToken } = require('../utils/tokenStore');
 const { assertJwtSecrets, getAccessTokenSecret, getRefreshTokenSecret } = require('../utils/jwtSecrets');
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -31,6 +30,18 @@ const saveRefreshToken = async (userId, token) => {
     'INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)',
     [userId, token, expiresAt]
   );
+};
+
+const persistRefreshToken = (userId, token) => {
+  saveRefreshToken(userId, token).catch((err) => {
+    console.log('[auth] refresh token save skipped', err.message);
+  });
+};
+
+const recordLastLogin = (userId) => {
+  query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [userId]).catch((err) => {
+    console.log('[login] last_login update skipped', err.message);
+  });
 };
 
 const AUTH_SCHEMA_ENSURE_ON_REQUEST = process.env.AUTH_SCHEMA_ENSURE === 'true';
@@ -668,8 +679,8 @@ const handleOAuthCallback = async (req, res) => {
     const user = await findOrCreateOAuthUser(provider, profile);
 
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
-    await saveAccessToken(user.id, accessToken);
-    await saveRefreshToken(user.id, refreshToken);
+    persistRefreshToken(user.id, refreshToken);
+    recordLastLogin(user.id);
     setTokenCookies(res, accessToken, refreshToken);
 
     return res.redirect(buildFrontendRedirect(stateData.returnTo || '/', { oauth: 'success' }));
@@ -700,18 +711,32 @@ const register = async (req, res, next) => {
     console.log('[register] hash done');
     const verifyToken = uuidv4();
 
-    const { rows } = await query(
-      `INSERT INTO users (name, email, phone, password_hash, city, email_verify_token)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, name, email, role, status, created_at`,
-      [name, email, phone || null, passwordHash, city || null, verifyToken]
-    );
+    let rows;
+    try {
+      const result = await query(
+        `INSERT INTO users (name, email, phone, password_hash, city, email_verify_token)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, name, email, role, status, created_at`,
+        [name, email, phone || null, passwordHash, city || null, verifyToken]
+      );
+      rows = result.rows;
+    } catch (err) {
+      if (err.code !== '42703') throw err;
+      console.log('[register] optional user column missing, retrying minimal insert');
+      const result = await query(
+        `INSERT INTO users (name, email, password_hash)
+         VALUES ($1, $2, $3)
+         RETURNING id, name, email, role, status, created_at`,
+        [name, email, passwordHash]
+      );
+      rows = result.rows;
+    }
     console.log('[register] insert done rows=', rows.length);
 
     const user = rows[0];
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
-    await saveAccessToken(user.id, accessToken);
-    await saveRefreshToken(user.id, refreshToken);
+    persistRefreshToken(user.id, refreshToken);
+    recordLastLogin(user.id);
     setTokenCookies(res, accessToken, refreshToken);
 
     // TODO: send verification email here
@@ -741,9 +766,7 @@ const login = async (req, res, next) => {
 
     const lookupStarted = authPerfStart(scope, 'user_lookup', requestStart, { email });
     const { rows } = await query(
-      `SELECT id, name, email, phone, role, status, avatar_url, bio, city, district,
-              email_verified, phone_verified, rating_avg, rating_count, listing_count,
-              created_at, password_hash
+      `SELECT id, name, email, role, status, created_at, password_hash
        FROM users
        WHERE email = $1
        LIMIT 1`,
@@ -778,11 +801,8 @@ const login = async (req, res, next) => {
     authPerfEnd(scope, 'token_generate', tokenGenerateStarted, requestStart, { userId: user.id });
 
     const tokenStoreStarted = authPerfStart(scope, 'token_store', requestStart, { userId: user.id });
-    await Promise.all([
-      saveAccessToken(user.id, accessToken),
-      saveRefreshToken(user.id, refreshToken),
-      query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]),
-    ]);
+    persistRefreshToken(user.id, refreshToken);
+    recordLastLogin(user.id);
     authPerfEnd(scope, 'token_store', tokenStoreStarted, requestStart, { userId: user.id });
     setTokenCookies(res, accessToken, refreshToken);
     delete user.password_hash;
@@ -830,8 +850,7 @@ const refresh = async (req, res, next) => {
     // Rotate: delete old, issue new
     await query('DELETE FROM refresh_tokens WHERE token = $1', [refreshToken]);
     const { accessToken, refreshToken: newRefresh } = generateTokens(decoded.userId, decoded.role);
-    await saveAccessToken(decoded.userId, accessToken);
-    await saveRefreshToken(decoded.userId, newRefresh);
+    persistRefreshToken(decoded.userId, newRefresh);
     setTokenCookies(res, accessToken, newRefresh);
 
     res.json({

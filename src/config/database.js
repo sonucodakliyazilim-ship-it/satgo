@@ -1,17 +1,36 @@
 const { Pool } = require('pg');
 
 function getDatabaseUrl() {
-  const directUrl =
-    process.env.DATABASE_URL ||
-    process.env.DATABASE_PRIVATE_URL ||
-    process.env.DATABASE_PUBLIC_URL ||
-    process.env.POSTGRES_URL ||
-    process.env.POSTGRES_PRISMA_URL ||
-    process.env.POSTGRES_URL_NON_POOLING ||
-    process.env.RAILWAY_DATABASE_URL;
+  const isRailwayRuntime = Boolean(
+    process.env.RAILWAY_ENVIRONMENT ||
+    process.env.RAILWAY_PROJECT_ID ||
+    process.env.RAILWAY_SERVICE_ID,
+  );
+
+  const candidates = isRailwayRuntime
+    ? [
+        process.env.DATABASE_PRIVATE_URL,
+        process.env.RAILWAY_DATABASE_URL,
+        process.env.DATABASE_URL,
+        process.env.DATABASE_PUBLIC_URL,
+        process.env.POSTGRES_URL,
+        process.env.POSTGRES_PRISMA_URL,
+        process.env.POSTGRES_URL_NON_POOLING,
+      ]
+    : [
+        process.env.DATABASE_URL,
+        process.env.DATABASE_PRIVATE_URL,
+        process.env.DATABASE_PUBLIC_URL,
+        process.env.POSTGRES_URL,
+        process.env.POSTGRES_PRISMA_URL,
+        process.env.POSTGRES_URL_NON_POOLING,
+        process.env.RAILWAY_DATABASE_URL,
+      ];
+
+  const directUrl = candidates.find((value) => value && String(value).trim());
 
   if (directUrl) {
-    return directUrl;
+    return String(directUrl).trim();
   }
 
   const host = process.env.PGHOST || process.env.POSTGRES_HOST || process.env.DB_HOST;
@@ -38,16 +57,24 @@ if (!databaseUrl) {
 
 const sslSetting = String(process.env.DB_SSL || '').trim().toLowerCase();
 const hasExplicitSslSetting = ['true', '1', 'yes', 'false', '0', 'no'].includes(sslSetting);
+const databaseHost = (() => {
+  try {
+    return new URL(databaseUrl).hostname;
+  } catch {
+    return '';
+  }
+})();
+const isRailwayPrivateHost = /(^|\.)railway\.internal$/i.test(databaseHost);
 const requiresSsl = hasExplicitSslSetting
   ? ['true', '1', 'yes'].includes(sslSetting)
-  : /railway|render|neon|supabase|amazonaws/i.test(databaseUrl);
+  : !isRailwayPrivateHost && /railway|rlwy|render|neon|supabase|amazonaws/i.test(databaseUrl);
 
 const pool = new Pool({
   connectionString: databaseUrl,
   ssl: requiresSsl ? { rejectUnauthorized: false } : undefined,
   max: Number(process.env.PGPOOL_MAX || 10),
   idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS || 30000),
-  connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 8000),
+  connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 15000),
   keepAlive: true,
   statement_timeout: Number(process.env.PG_STATEMENT_TIMEOUT_MS || 20000),
   query_timeout: Number(process.env.PG_QUERY_TIMEOUT_MS || 20000),
