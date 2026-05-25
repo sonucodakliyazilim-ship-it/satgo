@@ -81,15 +81,22 @@ const requiresSslForUrl = (databaseUrl) => {
     : !isRailwayPrivateHost && /railway|rlwy|render|neon|supabase|amazonaws/i.test(databaseUrl);
 };
 
+const numberFromEnv = (name, fallback) => {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+};
+
+const DB_CONNECT_TIMEOUT_MS = Math.min(numberFromEnv('PG_CONNECTION_TIMEOUT_MS', 3000), 5000);
+
 const poolOptionsForUrl = (databaseUrl) => ({
   connectionString: databaseUrl,
   ssl: requiresSslForUrl(databaseUrl) ? { rejectUnauthorized: false } : undefined,
-  max: Number(process.env.PGPOOL_MAX || 10),
-  idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS || 30000),
-  connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 3000),
+  max: numberFromEnv('PGPOOL_MAX', 10),
+  idleTimeoutMillis: numberFromEnv('PG_IDLE_TIMEOUT_MS', 30000),
+  connectionTimeoutMillis: DB_CONNECT_TIMEOUT_MS,
   keepAlive: true,
-  statement_timeout: Number(process.env.PG_STATEMENT_TIMEOUT_MS || 20000),
-  query_timeout: Number(process.env.PG_QUERY_TIMEOUT_MS || 20000),
+  statement_timeout: numberFromEnv('PG_STATEMENT_TIMEOUT_MS', 20000),
+  query_timeout: numberFromEnv('PG_QUERY_TIMEOUT_MS', 20000),
 });
 
 const DB_DEBUG = process.env.DB_DEBUG === 'true';
