@@ -31,8 +31,26 @@ function GirisContent() {
     const fromValidation = err?.response?.data?.errors?.map((e: any) => e.message).filter(Boolean).join('\n')
     const fromBody = err?.response?.data?.message
     if (fromValidation) return fromValidation
+    const lowerBody = String(fromBody || '').toLowerCase()
+    if (
+      lowerBody.includes('timeout exceeded') ||
+      lowerBody.includes('trying to connect') ||
+      lowerBody.includes('connection terminated')
+    ) {
+      return 'Sunucu veritabanına bağlanırken zaman aşımı oluştu. Lütfen tekrar deneyin.'
+    }
     if (fromBody) return fromBody
     const code = err?.code
+    const lowerMessage = String(err?.message || '').toLowerCase()
+    if (
+      code === 'ECONNABORTED' ||
+      code === 'ETIMEDOUT' ||
+      code === 'ERR_NETWORK' ||
+      lowerMessage.includes('timeout') ||
+      lowerMessage.includes('trying to connect')
+    ) {
+      return 'Sunucuya bağlanırken zaman aşımı oluştu. Lütfen tekrar deneyin.'
+    }
     if (code === 'ECONNABORTED' || err?.message?.includes?.('timeout')) {
       return 'Sunucuya bağlanırken zaman aşımı oluştu. İnternet bağlantınızı kontrol edin.'
     }

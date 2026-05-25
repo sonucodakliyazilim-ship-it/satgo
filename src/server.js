@@ -145,9 +145,16 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  const status = err.status || err.statusCode || (err.name === 'MulterError' ? 400 : 500);
+  const isDbConnectionError =
+    ['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNABORTED'].includes(err.code) ||
+    /timeout exceeded when trying to connect|connection terminated|connect ETIMEDOUT|getaddrinfo/i.test(err.message || '');
+  const status = isDbConnectionError
+    ? 503
+    : err.status || err.statusCode || (err.name === 'MulterError' ? 400 : 500);
   let message = err.message || 'Sunucu hatası.';
-  if (err.code === 'LIMIT_FILE_SIZE') {
+  if (isDbConnectionError) {
+    message = 'Veritabanı bağlantısı geçici olarak kurulamadı. Lütfen tekrar deneyin.';
+  } else if (err.code === 'LIMIT_FILE_SIZE') {
     message = 'Fotoğraf boyutu en fazla 15 MB olabilir.';
   } else if (err.code === 'LIMIT_FILE_COUNT') {
     message = 'En fazla 10 fotoğraf yükleyebilirsiniz.';

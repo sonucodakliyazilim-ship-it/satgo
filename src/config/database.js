@@ -1,37 +1,40 @@
 const { Pool } = require('pg');
 
-function getDatabaseUrl() {
+function pushUrlCandidate(candidates, source, value) {
+  const url = String(value || '').trim();
+  if (!url || candidates.some((item) => item.url === url)) return;
+  candidates.push({ source, url });
+}
+
+function getDatabaseCandidates() {
   const isRailwayRuntime = Boolean(
     process.env.RAILWAY_ENVIRONMENT ||
     process.env.RAILWAY_PROJECT_ID ||
     process.env.RAILWAY_SERVICE_ID,
   );
 
-  const candidates = isRailwayRuntime
+  const candidateNames = isRailwayRuntime
     ? [
-        process.env.DATABASE_PRIVATE_URL,
-        process.env.RAILWAY_DATABASE_URL,
-        process.env.DATABASE_URL,
-        process.env.DATABASE_PUBLIC_URL,
-        process.env.POSTGRES_URL,
-        process.env.POSTGRES_PRISMA_URL,
-        process.env.POSTGRES_URL_NON_POOLING,
+        'DATABASE_PRIVATE_URL',
+        'RAILWAY_DATABASE_URL',
+        'DATABASE_URL',
+        'DATABASE_PUBLIC_URL',
+        'POSTGRES_URL',
+        'POSTGRES_PRISMA_URL',
+        'POSTGRES_URL_NON_POOLING',
       ]
     : [
-        process.env.DATABASE_URL,
-        process.env.DATABASE_PRIVATE_URL,
-        process.env.DATABASE_PUBLIC_URL,
-        process.env.POSTGRES_URL,
-        process.env.POSTGRES_PRISMA_URL,
-        process.env.POSTGRES_URL_NON_POOLING,
-        process.env.RAILWAY_DATABASE_URL,
+        'DATABASE_URL',
+        'DATABASE_PRIVATE_URL',
+        'DATABASE_PUBLIC_URL',
+        'POSTGRES_URL',
+        'POSTGRES_PRISMA_URL',
+        'POSTGRES_URL_NON_POOLING',
+        'RAILWAY_DATABASE_URL',
       ];
 
-  const directUrl = candidates.find((value) => value && String(value).trim());
-
-  if (directUrl) {
-    return String(directUrl).trim();
-  }
+  const candidates = [];
+  candidateNames.forEach((name) => pushUrlCandidate(candidates, name, process.env[name]));
 
   const host = process.env.PGHOST || process.env.POSTGRES_HOST || process.env.DB_HOST;
   const port = process.env.PGPORT || process.env.POSTGRES_PORT || process.env.DB_PORT || '5432';
@@ -41,15 +44,19 @@ function getDatabaseUrl() {
   const password = process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD || process.env.DB_PASSWORD;
 
   if (host && database && user && password) {
-    return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
+    pushUrlCandidate(
+      candidates,
+      'PGHOST/DB_HOST',
+      `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${database}`,
+    );
   }
 
-  return null;
+  return candidates;
 }
 
-const databaseUrl = getDatabaseUrl();
+const databaseCandidates = getDatabaseCandidates();
 
-if (!databaseUrl) {
+if (!databaseCandidates.length) {
   throw new Error(
     'Database connection env is missing. Set DATABASE_URL, PGHOST/PGDATABASE/PGUSER/PGPASSWORD, or DB_HOST/DB_NAME/DB_USER/DB_PASSWORD.',
   );
@@ -57,24 +64,29 @@ if (!databaseUrl) {
 
 const sslSetting = String(process.env.DB_SSL || '').trim().toLowerCase();
 const hasExplicitSslSetting = ['true', '1', 'yes', 'false', '0', 'no'].includes(sslSetting);
-const databaseHost = (() => {
+
+const getDatabaseHost = (databaseUrl) => {
   try {
     return new URL(databaseUrl).hostname;
   } catch {
     return '';
   }
-})();
-const isRailwayPrivateHost = /(^|\.)railway\.internal$/i.test(databaseHost);
-const requiresSsl = hasExplicitSslSetting
-  ? ['true', '1', 'yes'].includes(sslSetting)
-  : !isRailwayPrivateHost && /railway|rlwy|render|neon|supabase|amazonaws/i.test(databaseUrl);
+};
 
-const pool = new Pool({
+const requiresSslForUrl = (databaseUrl) => {
+  const databaseHost = getDatabaseHost(databaseUrl);
+  const isRailwayPrivateHost = /(^|\.)railway\.internal$/i.test(databaseHost);
+  return hasExplicitSslSetting
+    ? ['true', '1', 'yes'].includes(sslSetting)
+    : !isRailwayPrivateHost && /railway|rlwy|render|neon|supabase|amazonaws/i.test(databaseUrl);
+};
+
+const poolOptionsForUrl = (databaseUrl) => ({
   connectionString: databaseUrl,
-  ssl: requiresSsl ? { rejectUnauthorized: false } : undefined,
+  ssl: requiresSslForUrl(databaseUrl) ? { rejectUnauthorized: false } : undefined,
   max: Number(process.env.PGPOOL_MAX || 10),
   idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS || 30000),
-  connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 15000),
+  connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 3000),
   keepAlive: true,
   statement_timeout: Number(process.env.PG_STATEMENT_TIMEOUT_MS || 20000),
   query_timeout: Number(process.env.PG_QUERY_TIMEOUT_MS || 20000),
@@ -82,13 +94,26 @@ const pool = new Pool({
 
 const DB_DEBUG = process.env.DB_DEBUG === 'true';
 
-pool.on('error', (err) => {
-  console.error('Unexpected DB pool error:', err.code || err.message);
-  // Do not exit immediately; allow graceful handling. Errors from idle connections
-  // or pool lifecycle should not terminate the server.
-  if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
-    console.error('DB connection lost. Verify database is running.');
-  }
+const makePoolLabel = ({ source, url }) => {
+  const host = getDatabaseHost(url);
+  return host ? `${source} (${host})` : source;
+};
+
+const poolEntries = databaseCandidates.map((candidate) => ({
+  ...candidate,
+  label: makePoolLabel(candidate),
+  pool: new Pool(poolOptionsForUrl(candidate.url)),
+}));
+
+let activePoolIndex = 0;
+
+poolEntries.forEach((entry) => {
+  entry.pool.on('error', (err) => {
+    console.error(`[db.pool.error] ${entry.label}:`, err.code || err.message);
+    if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
+      console.error('DB connection lost. Verify database is running.');
+    }
+  });
 });
 
 const compactSql = (text) =>
@@ -119,6 +144,76 @@ const logQueryError = (err, text, params) => {
     console.error('[db syntax sql]', compactSql(text));
     if (Array.isArray(params)) console.error('[db syntax params]', sanitizeParams(params));
   }
+};
+
+const CONNECTION_ERROR_CODES = new Set([
+  'ETIMEDOUT',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ECONNABORTED',
+  '08000',
+  '08001',
+  '08003',
+  '08006',
+  '57P01',
+]);
+
+const isConnectionFailure = (err) => {
+  const message = err?.message || '';
+  return (
+    CONNECTION_ERROR_CODES.has(err?.code) ||
+    /timeout exceeded when trying to connect|connection terminated|connect ETIMEDOUT|getaddrinfo|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN/i.test(message)
+  );
+};
+
+const getCandidateOrder = () => [
+  activePoolIndex,
+  ...poolEntries.map((_, index) => index).filter((index) => index !== activePoolIndex),
+];
+
+const runWithPoolFallback = async (action, operation) => {
+  let lastError;
+
+  for (const index of getCandidateOrder()) {
+    const entry = poolEntries[index];
+    try {
+      const result = await operation(entry.pool, entry);
+      if (index !== activePoolIndex) {
+        console.warn(`[db.fallback.active] switched to ${entry.label}`);
+      }
+      activePoolIndex = index;
+      return result;
+    } catch (err) {
+      lastError = err;
+      if (!isConnectionFailure(err) || poolEntries.length === 1) {
+        throw err;
+      }
+      console.warn(`[db.fallback.${action}.failed] ${entry.label}:`, err.code || err.message);
+    }
+  }
+
+  throw lastError;
+};
+
+const pool = {
+  query: (text, params) => runWithPoolFallback('query', (pgPool) => pgPool.query(text, params)),
+  connect: () => runWithPoolFallback('connect', (pgPool) => pgPool.connect()),
+  end: async () => {
+    const results = await Promise.allSettled(poolEntries.map((entry) => entry.pool.end()));
+    const rejected = results.find((result) => result.status === 'rejected');
+    if (rejected) throw rejected.reason;
+  },
+  get totalCount() {
+    return poolEntries.reduce((sum, entry) => sum + entry.pool.totalCount, 0);
+  },
+  get idleCount() {
+    return poolEntries.reduce((sum, entry) => sum + entry.pool.idleCount, 0);
+  },
+  get waitingCount() {
+    return poolEntries.reduce((sum, entry) => sum + entry.pool.waitingCount, 0);
+  },
 };
 
 const query = async (text, params) => {
