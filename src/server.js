@@ -68,12 +68,29 @@ const uploadRoot = path.isAbsolute(process.env.UPLOAD_DIR || '')
   : path.join(__dirname, '..', process.env.UPLOAD_DIR || 'uploads');
 app.use('/uploads', express.static(uploadRoot));
 
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-  max: parseInt(process.env.RATE_LIMIT_MAX) || 100,
-  message: { success: false, message: 'Çok fazla istek. Lütfen bekleyin.' },
+app.get('/api/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ success: true, message: 'API çalışıyor', db: 'connected' });
+  } catch {
+    res.status(500).json({ success: false, message: 'DB bağlantısı yok' });
+  }
 });
-app.use('/api/', limiter);
+
+const mutationLimiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 5 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => ['GET', 'HEAD', 'OPTIONS'].includes(req.method),
+  handler: (req, res) => {
+    res.status(429).json({
+      success: false,
+      message: 'Çok hızlı işlem yaptınız. Birkaç saniye sonra tekrar deneyin.',
+    });
+  },
+});
+app.use('/api/', mutationLimiter);
 
 app.use('/api/auth', authRoutes);
 
@@ -127,15 +144,6 @@ app.get('/api/me', auth, async (req, res, next) => {
     });
   } catch (err) {
     next(err);
-  }
-});
-
-app.get('/api/health', async (req, res) => {
-  try {
-    await pool.query('SELECT 1');
-    res.json({ success: true, message: 'API çalışıyor', db: 'connected' });
-  } catch {
-    res.status(500).json({ success: false, message: 'DB bağlantısı yok' });
   }
 });
 
