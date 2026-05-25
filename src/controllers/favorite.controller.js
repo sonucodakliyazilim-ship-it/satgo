@@ -1,8 +1,21 @@
 const { query } = require('../config/database');
 
+let listingRuntimeSchemaPromise = null;
+const ensureListingRuntimeSchema = () => {
+  if (!listingRuntimeSchemaPromise) {
+    listingRuntimeSchemaPromise = query('ALTER TABLE listings ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ')
+      .catch((err) => {
+        listingRuntimeSchemaPromise = null;
+        throw err;
+      });
+  }
+  return listingRuntimeSchemaPromise;
+};
+
 // GET /api/favorites
 const getFavorites = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     const { rows } = await query(
       `SELECT l.*, f.created_at AS favorited_at,
               c.name AS category_name, c.icon AS category_icon,
@@ -13,6 +26,7 @@ const getFavorites = async (req, res, next) => {
        JOIN categories c ON c.id = l.category_id
        JOIN users u ON u.id = l.user_id
        WHERE f.user_id = $1
+         AND l.deleted_at IS NULL
        ORDER BY f.created_at DESC`,
       [req.user.id]
     );
@@ -23,8 +37,9 @@ const getFavorites = async (req, res, next) => {
 // POST /api/favorites/:listingId
 const addFavorite = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     const { listingId } = req.params;
-    const listing = await query('SELECT id FROM listings WHERE id = $1', [listingId]);
+    const listing = await query('SELECT id FROM listings WHERE id = $1 AND deleted_at IS NULL', [listingId]);
     if (!listing.rows.length) return res.status(404).json({ success: false, message: 'İlan bulunamadı.' });
 
     await query(
@@ -49,8 +64,14 @@ const removeFavorite = async (req, res, next) => {
 // GET /api/favorites/check/:listingId
 const checkFavorite = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     const { rows } = await query(
-      'SELECT id FROM favorites WHERE user_id = $1 AND listing_id = $2',
+      `SELECT f.id
+       FROM favorites f
+       JOIN listings l ON l.id = f.listing_id
+       WHERE f.user_id = $1
+         AND f.listing_id = $2
+         AND l.deleted_at IS NULL`,
       [req.user.id, req.params.listingId]
     );
     res.json({ success: true, data: { is_favorited: rows.length > 0 } });

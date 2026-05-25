@@ -174,12 +174,21 @@ server.listen(PORT, '0.0.0.0', () => {
 
 server.on('error', (err) => {
   console.error('[Server Error]', err.code, err.message);
-  process.exit(1);
+  if (err.code === 'EADDRINUSE') {
+    process.exit(1);
+  }
+});
+
+process.on('unhandledRejection', (reason) => {
+  const message = reason?.message || reason;
+  console.error('[Unhandled Rejection]', message);
 });
 
 process.on('uncaughtException', (err) => {
   console.error('[Uncaught Exception]', err.message);
-  process.exit(1);
+  if (err.code === 'EADDRINUSE') {
+    process.exit(1);
+  }
 });
 
 process.on('exit', (code) => {

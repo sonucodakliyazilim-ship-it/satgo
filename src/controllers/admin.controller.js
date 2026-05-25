@@ -1,4 +1,4 @@
-const { query, withTransaction } = require('../config/database');
+const { query } = require('../config/database');
 const {
   getPaymentSettings,
   updatePaymentSettings,
@@ -7,17 +7,40 @@ const {
   rejectPromotionOrder,
 } = require('../services/promotion.service');
 
+let listingRuntimeSchemaPromise = null;
+const ensureListingRuntimeSchema = () => {
+  if (!listingRuntimeSchemaPromise) {
+    listingRuntimeSchemaPromise = query('ALTER TABLE listings ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ')
+      .catch((err) => {
+        listingRuntimeSchemaPromise = null;
+        throw err;
+      });
+  }
+  return listingRuntimeSchemaPromise;
+};
+
+const adjustUserListingCount = (userId, delta) => {
+  if (!userId) return;
+  query(
+    'UPDATE users SET listing_count = GREATEST(COALESCE(listing_count, 0) + $1, 0) WHERE id = $2',
+    [delta, userId],
+  ).catch((err) => {
+    console.warn('[admin.listings] listing_count update skipped:', err.message);
+  });
+};
+
 // GET /api/admin/dashboard
 const getDashboard = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     const [users, listings, revenue, reports, todayUsers, todayListings, activePromos] =
       await Promise.all([
         query('SELECT COUNT(*) FROM users'),
-        query(`SELECT COUNT(*) FROM listings WHERE status = 'active'`),
+        query(`SELECT COUNT(*) FROM listings WHERE status = 'active' AND deleted_at IS NULL`),
         query(`SELECT COALESCE(SUM(price),0) AS total FROM listing_promotions WHERE payment_status = 'completed'`),
         query(`SELECT COUNT(*) FROM reports WHERE status = 'pending'`),
         query(`SELECT COUNT(*) FROM users WHERE created_at >= CURRENT_DATE`),
-        query(`SELECT COUNT(*) FROM listings WHERE created_at >= CURRENT_DATE`),
+        query(`SELECT COUNT(*) FROM listings WHERE created_at >= CURRENT_DATE AND deleted_at IS NULL`),
         query(`SELECT COUNT(*) FROM listing_promotions WHERE payment_status = 'completed' AND ends_at > NOW()`),
       ]);
 
@@ -77,11 +100,12 @@ const setUserStatus = async (req, res, next) => {
 // GET /api/admin/listings
 const getListings = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     const { page = 1, status, search } = req.query;
     const PER_PAGE = 20;
     const offset = (page - 1) * PER_PAGE;
     const params = [];
-    const conds  = [];
+    const conds  = ['l.deleted_at IS NULL'];
     let p = 1;
 
     if (status) { conds.push(`l.status = $${p++}`); params.push(status); }
@@ -107,6 +131,7 @@ const getListings = async (req, res, next) => {
 // PATCH /api/admin/listings/:id/status
 const setListingStatus = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     const { status, rejection_reason } = req.body;
     const approved = status === 'active';
     const { rows } = await query(
@@ -115,7 +140,7 @@ const setListingStatus = async (req, res, next) => {
          rejection_reason = $2,
          approved_by = $3,
          approved_at = CASE WHEN $4::boolean THEN NOW() ELSE NULL END
-       WHERE id = $5 RETURNING id, title, status`,
+       WHERE id = $5 AND deleted_at IS NULL RETURNING id, title, status`,
       [status, rejection_reason || null, req.user.id, approved, req.params.id]
     );
     if (!rows.length) return res.status(404).json({ success: false, message: 'İlan bulunamadı.' });
@@ -126,21 +151,25 @@ const setListingStatus = async (req, res, next) => {
 // DELETE /api/admin/listings/:id
 const deleteListing = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     const { id } = req.params;
-    await withTransaction(async (client) => {
-      const { rows } = await client.query('SELECT user_id FROM listings WHERE id = $1', [id]);
-      if (!rows.length) {
-        const err = new Error('Ilan bulunamadi.');
-        err.status = 404;
-        throw err;
-      }
+    const { rows } = await query(
+      `UPDATE listings
+       SET status = 'passive'::listing_status,
+           deleted_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $1
+         AND deleted_at IS NULL
+       RETURNING id, user_id`,
+      [id],
+    );
+    if (!rows.length) {
+      const err = new Error('Ilan bulunamadi.');
+      err.status = 404;
+      throw err;
+    }
 
-      await client.query('DELETE FROM listings WHERE id = $1', [id]);
-      await client.query(
-        'UPDATE users SET listing_count = GREATEST(listing_count - 1, 0) WHERE id = $1',
-        [rows[0].user_id],
-      );
-    });
+    adjustUserListingCount(rows[0].user_id, -1);
     res.json({ success: true, message: 'Ilan silindi.' });
   } catch (err) { next(err); }
 };

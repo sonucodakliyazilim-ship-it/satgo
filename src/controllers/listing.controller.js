@@ -8,6 +8,28 @@ const { insertListingImages } = require('./upload.controller');
 const LISTINGS_PER_PAGE = 20;
 const CUSTOM_FIELD_SCHEMA_ENSURE_ON_REQUEST = process.env.CUSTOM_FIELD_SCHEMA_ENSURE === 'true';
 
+let listingRuntimeSchemaPromise = null;
+const ensureListingRuntimeSchema = () => {
+  if (!listingRuntimeSchemaPromise) {
+    listingRuntimeSchemaPromise = query('ALTER TABLE listings ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ')
+      .catch((err) => {
+        listingRuntimeSchemaPromise = null;
+        throw err;
+      });
+  }
+  return listingRuntimeSchemaPromise;
+};
+
+const adjustUserListingCount = (userId, delta) => {
+  if (!userId) return;
+  query(
+    'UPDATE users SET listing_count = GREATEST(COALESCE(listing_count, 0) + $1, 0) WHERE id = $2',
+    [delta, userId],
+  ).catch((err) => {
+    console.warn('[listings] listing_count update skipped:', err.message);
+  });
+};
+
 const perfStart = (scope, step, requestStart, extra = {}) => {
   console.log(`[perf] ${scope}.${step}.start`, {
     totalMs: Date.now() - requestStart,
@@ -52,7 +74,7 @@ const getCategoryScopeIds = async (categoryId) => {
 const buildListingQuery = ({ category, city, district, minPrice, maxPrice, search,
   sortBy, status, userId, featured, urgent, showcase, preferredCity, preferredDistrict, page = 1, categoryIds }) => {
 
-  const conditions = ["l.status = 'active'"];
+  const conditions = ["l.status = 'active'", 'l.deleted_at IS NULL'];
   const params = [];
   const orderParams = [];
   let p = 1;
@@ -165,6 +187,7 @@ const HOME_SECTION_CONFIGS = [
 // GET /api/listings
 const getListings = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     await refreshExpiredPromotions();
     const categoryIds = req.query.category ? await getCategoryScopeIds(req.query.category) : [];
     const { where, order, params, orderParams, offset } = buildListingQuery({ ...req.query, categoryIds });
@@ -194,6 +217,7 @@ const getListings = async (req, res, next) => {
 // GET /api/listings/home-sections
 const getHomeSections = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     await refreshExpiredPromotions();
 
     const sections = await Promise.all(
@@ -219,6 +243,7 @@ const getHomeSections = async (req, res, next) => {
 // GET /api/listings/:id
 const getListing = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     await refreshExpiredPromotions();
     const { id } = req.params;
 
@@ -234,7 +259,7 @@ const getListing = async (req, res, next) => {
        JOIN categories c ON c.id = l.category_id
        LEFT JOIN categories sc ON sc.id = l.sub_category_id
        JOIN users u ON u.id = l.user_id
-       WHERE l.id = $1`,
+       WHERE l.id = $1 AND l.deleted_at IS NULL`,
       [id]
     );
 
@@ -351,6 +376,7 @@ const createListing = async (req, res, next) => {
   const scope = 'listing.create';
   console.log(`[perf] ${scope}.start`, { userId: req.user.id, title: req.body.title });
   try {
+    await ensureListingRuntimeSchema();
     const {
       category_id, sub_category_id, title, description, price, price_negotiable,
       condition, city, district, neighborhood, latitude, longitude,
@@ -466,16 +492,10 @@ const createListing = async (req, res, next) => {
         perfEnd(scope, 'custom_fields_save', customFieldStart, startTime, { listingId: listing.id, count: custom_fields.length });
       }
 
-      const userUpdateStart = perfStart(scope, 'user_listing_count_update', startTime, { listingId: listing.id });
-      await client.query(
-        'UPDATE users SET listing_count = listing_count + 1 WHERE id = $1',
-        [req.user.id]
-      );
-      perfEnd(scope, 'user_listing_count_update', userUpdateStart, startTime, { listingId: listing.id });
-
       return listing;
     });
     perfEnd(scope, 'transaction', transactionStart, startTime, { listingId: result.id });
+    adjustUserListingCount(req.user.id, 1);
 
     const responseStart = perfStart(scope, 'response_send', startTime, { listingId: result.id });
     res.status(201).json({
@@ -570,6 +590,7 @@ const createListingWithImages = async (req, res, next) => {
 // PATCH /api/listings/:id
 const updateListing = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     const { id } = req.params;
     const {
       title, description, price, price_negotiable, condition,
@@ -587,7 +608,7 @@ const updateListing = async (req, res, next) => {
     await ensureCustomFieldTables();
 
     await withTransaction(async (client) => {
-      await client.query(
+      const listingUpdate = await client.query(
         `UPDATE listings SET
            title = COALESCE($1, title),
            description = COALESCE($2, description),
@@ -601,7 +622,8 @@ const updateListing = async (req, res, next) => {
            hierarchy_path = CASE WHEN $10 THEN $11 ELSE hierarchy_path END,
            hierarchy_labels = CASE WHEN $12 THEN $13 ELSE hierarchy_labels END,
            updated_at = NOW()
-         WHERE id = $14`,
+         WHERE id = $14
+           AND deleted_at IS NULL`,
         [
           title, description, price, price_negotiable, condition, city, district, neighborhood,
           cleanHierarchyGroup,
@@ -610,6 +632,9 @@ const updateListing = async (req, res, next) => {
           id,
         ]
       );
+      if (!listingUpdate.rowCount) {
+        throw Object.assign(new Error('İlan bulunamadı.'), { status: 404 });
+      }
 
       if (vehicle_details) {
         const v = vehicle_details;
@@ -673,7 +698,7 @@ const updateListing = async (req, res, next) => {
       }
     });
 
-    const updated = await query('SELECT * FROM listings WHERE id = $1', [id]);
+    const updated = await query('SELECT * FROM listings WHERE id = $1 AND deleted_at IS NULL', [id]);
     res.json({ success: true, message: 'İlan güncellendi.', data: updated.rows[0] });
   } catch (err) {
     next(err);
@@ -683,17 +708,21 @@ const updateListing = async (req, res, next) => {
 // DELETE /api/listings/:id
 const deleteListing = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     const { id } = req.params;
-    await withTransaction(async (client) => {
-      const { rows } = await client.query('SELECT user_id FROM listings WHERE id = $1', [id]);
-      if (!rows.length) throw Object.assign(new Error('İlan bulunamadı.'), { status: 404 });
+    const { rows } = await query(
+      `UPDATE listings
+       SET status = 'passive'::listing_status,
+           deleted_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $1
+         AND deleted_at IS NULL
+       RETURNING id, user_id`,
+      [id],
+    );
+    if (!rows.length) throw Object.assign(new Error('İlan bulunamadı.'), { status: 404 });
 
-      await client.query('DELETE FROM listings WHERE id = $1', [id]);
-      await client.query(
-        'UPDATE users SET listing_count = GREATEST(listing_count - 1, 0) WHERE id = $1',
-        [rows[0].user_id]
-      );
-    });
+    adjustUserListingCount(rows[0].user_id, -1);
     res.json({ success: true, message: 'İlan silindi.' });
   } catch (err) {
     next(err);
@@ -703,9 +732,10 @@ const deleteListing = async (req, res, next) => {
 // GET /api/listings/me - listings owned by the authenticated user
 const getMyListings = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     const { status } = req.query;
     const params = [req.user.id];
-    const conds = ['l.user_id = $1'];
+    const conds = ['l.user_id = $1', 'l.deleted_at IS NULL'];
 
     if (status && status !== 'all') {
       params.push(status);
@@ -740,6 +770,7 @@ const getMyListings = async (req, res, next) => {
 // PATCH /api/listings/:id/status - owner can hide, mark sold, or reactivate already-approved listings
 const setListingStatus = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     const { id } = req.params;
     const { status } = req.body;
     const allowed = ['active', 'passive', 'sold'];
@@ -749,7 +780,7 @@ const setListingStatus = async (req, res, next) => {
     }
 
     const current = await query(
-      'SELECT id, user_id, status, approved_at FROM listings WHERE id = $1',
+      'SELECT id, user_id, status, approved_at FROM listings WHERE id = $1 AND deleted_at IS NULL',
       [id],
     );
     if (!current.rows.length) {
@@ -769,9 +800,13 @@ const setListingStatus = async (req, res, next) => {
       `UPDATE listings
        SET status = $1::listing_status, updated_at = NOW()
        WHERE id = $2
+         AND deleted_at IS NULL
        RETURNING *`,
       [status, id],
     );
+    if (!rows.length) {
+      return res.status(404).json({ success: false, message: 'İlan bulunamadı.' });
+    }
 
     res.json({ success: true, message: 'İlan durumu güncellendi.', data: rows[0] });
   } catch (err) {
@@ -782,6 +817,7 @@ const setListingStatus = async (req, res, next) => {
 // GET /api/listings/user/:userId  — listings by a user
 const getUserListings = async (req, res, next) => {
   try {
+    await ensureListingRuntimeSchema();
     const { userId } = req.params;
     const { status = 'active', page = 1 } = req.query;
     const offset = (page - 1) * LISTINGS_PER_PAGE;
@@ -790,7 +826,7 @@ const getUserListings = async (req, res, next) => {
       `SELECT l.*, c.name AS category_name, c.icon AS category_icon,
               (SELECT image_url FROM listing_images WHERE listing_id = l.id ORDER BY is_primary DESC, sort_order ASC, created_at ASC LIMIT 1) AS primary_image
        FROM listings l JOIN categories c ON c.id = l.category_id
-       WHERE l.user_id = $1 AND l.status = $2
+       WHERE l.user_id = $1 AND l.status = $2 AND l.deleted_at IS NULL
        ORDER BY l.created_at DESC
        LIMIT $3 OFFSET $4`,
       [userId, status, LISTINGS_PER_PAGE, offset]

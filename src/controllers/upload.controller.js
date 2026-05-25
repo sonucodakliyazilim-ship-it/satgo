@@ -26,6 +26,18 @@ const ALWAYS_LOG_STEPS = new Set([
   'transaction.end',
 ]);
 
+let listingRuntimeSchemaPromise = null;
+const ensureListingRuntimeSchema = () => {
+  if (!listingRuntimeSchemaPromise) {
+    listingRuntimeSchemaPromise = query('ALTER TABLE listings ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ')
+      .catch((err) => {
+        listingRuntimeSchemaPromise = null;
+        throw err;
+      });
+  }
+  return listingRuntimeSchemaPromise;
+};
+
 sharp.concurrency(Number(process.env.SHARP_CONCURRENCY || 2));
 
 const storage = multer.memoryStorage();
@@ -463,8 +475,9 @@ const prepareListingImage = async (listingId, file, index) => {
 };
 
 const assertListingOwnership = async (client, listingId, user, forUpdate = false) => {
+  await ensureListingRuntimeSchema();
   const { rows } = await client.query(
-    `SELECT user_id FROM listings WHERE id = $1${forUpdate ? ' FOR UPDATE' : ''}`,
+    `SELECT user_id FROM listings WHERE id = $1 AND deleted_at IS NULL${forUpdate ? ' FOR UPDATE' : ''}`,
     [listingId],
   );
 

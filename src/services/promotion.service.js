@@ -92,74 +92,77 @@ const refreshExpiredPromotions = async ({ force = false } = {}) => {
   if (promotionRefreshPromise) return promotionRefreshPromise;
 
   promotionRefreshPromise = (async () => {
-  const expired = await query(
-    `UPDATE listing_promotions
-     SET status = 'expired'
-     WHERE payment_status = 'completed'
-       AND status = 'active'
-       AND ends_at IS NOT NULL
-       AND ends_at <= NOW()
-     RETURNING listing_id`,
-  );
+    try {
+      const expired = await query(
+        `UPDATE listing_promotions
+         SET status = 'expired'
+         WHERE payment_status = 'completed'
+           AND status = 'active'
+           AND ends_at IS NOT NULL
+           AND ends_at <= NOW()
+         RETURNING listing_id`,
+      );
 
-  const expiredListingIds = [...new Set(expired.rows.map((row) => row.listing_id).filter(Boolean))];
+      const expiredListingIds = [...new Set(expired.rows.map((row) => row.listing_id).filter(Boolean))];
 
-  if (!force && !expiredListingIds.length) {
-    lastPromotionRefreshAt = Date.now();
-    return;
-  }
+      if (!force && !expiredListingIds.length) {
+        lastPromotionRefreshAt = Date.now();
+        return;
+      }
 
-  const idCondition = force ? '' : 'WHERE l.id = ANY($1::uuid[])';
-  const params = force ? [] : [expiredListingIds];
+      const idCondition = force ? '' : 'WHERE l.id = ANY($1::uuid[])';
+      const params = force ? [] : [expiredListingIds];
 
-  await query(
-    `UPDATE listings l SET
-       is_featured = EXISTS (
-         SELECT 1 FROM listing_promotions lp
-         WHERE lp.listing_id = l.id AND lp.type = 'featured'
-           AND lp.payment_status = 'completed' AND lp.status = 'active'
-           AND lp.ends_at > NOW()
-       ),
-       featured_until = (
-         SELECT MAX(lp.ends_at) FROM listing_promotions lp
-         WHERE lp.listing_id = l.id AND lp.type = 'featured'
-           AND lp.payment_status = 'completed' AND lp.status = 'active'
-           AND lp.ends_at > NOW()
-       ),
-       is_urgent = EXISTS (
-         SELECT 1 FROM listing_promotions lp
-         WHERE lp.listing_id = l.id AND lp.type = 'urgent'
-           AND lp.payment_status = 'completed' AND lp.status = 'active'
-           AND lp.ends_at > NOW()
-       ),
-       urgent_until = (
-         SELECT MAX(lp.ends_at) FROM listing_promotions lp
-         WHERE lp.listing_id = l.id AND lp.type = 'urgent'
-           AND lp.payment_status = 'completed' AND lp.status = 'active'
-           AND lp.ends_at > NOW()
-       ),
-       is_showcase = EXISTS (
-         SELECT 1 FROM listing_promotions lp
-         WHERE lp.listing_id = l.id AND lp.type = 'showcase'
-           AND lp.payment_status = 'completed' AND lp.status = 'active'
-           AND lp.ends_at > NOW()
-       ),
-       showcase_until = (
-         SELECT MAX(lp.ends_at) FROM listing_promotions lp
-         WHERE lp.listing_id = l.id AND lp.type = 'showcase'
-           AND lp.payment_status = 'completed' AND lp.status = 'active'
-           AND lp.ends_at > NOW()
-       ),
-       boosted_at = (
-         SELECT MAX(lp.starts_at) FROM listing_promotions lp
-         WHERE lp.listing_id = l.id AND lp.type = 'boost'
-           AND lp.payment_status = 'completed' AND lp.status = 'active'
-           AND lp.ends_at > NOW()
-       )
-     ${idCondition}`,
-    params,
-  );
-
+      await query(
+        `UPDATE listings l SET
+           is_featured = EXISTS (
+             SELECT 1 FROM listing_promotions lp
+             WHERE lp.listing_id = l.id AND lp.type = 'featured'
+               AND lp.payment_status = 'completed' AND lp.status = 'active'
+               AND lp.ends_at > NOW()
+           ),
+           featured_until = (
+             SELECT MAX(lp.ends_at) FROM listing_promotions lp
+             WHERE lp.listing_id = l.id AND lp.type = 'featured'
+               AND lp.payment_status = 'completed' AND lp.status = 'active'
+               AND lp.ends_at > NOW()
+           ),
+           is_urgent = EXISTS (
+             SELECT 1 FROM listing_promotions lp
+             WHERE lp.listing_id = l.id AND lp.type = 'urgent'
+               AND lp.payment_status = 'completed' AND lp.status = 'active'
+               AND lp.ends_at > NOW()
+           ),
+           urgent_until = (
+             SELECT MAX(lp.ends_at) FROM listing_promotions lp
+             WHERE lp.listing_id = l.id AND lp.type = 'urgent'
+               AND lp.payment_status = 'completed' AND lp.status = 'active'
+               AND lp.ends_at > NOW()
+           ),
+           is_showcase = EXISTS (
+             SELECT 1 FROM listing_promotions lp
+             WHERE lp.listing_id = l.id AND lp.type = 'showcase'
+               AND lp.payment_status = 'completed' AND lp.status = 'active'
+               AND lp.ends_at > NOW()
+           ),
+           showcase_until = (
+             SELECT MAX(lp.ends_at) FROM listing_promotions lp
+             WHERE lp.listing_id = l.id AND lp.type = 'showcase'
+               AND lp.payment_status = 'completed' AND lp.status = 'active'
+               AND lp.ends_at > NOW()
+           ),
+           boosted_at = (
+             SELECT MAX(lp.starts_at) FROM listing_promotions lp
+             WHERE lp.listing_id = l.id AND lp.type = 'boost'
+               AND lp.payment_status = 'completed' AND lp.status = 'active'
+               AND lp.ends_at > NOW()
+           )
+         ${idCondition}`,
+        params,
+      );
+    } catch (err) {
+      console.warn('[promotions] refresh skipped:', err.message);
+    }
     lastPromotionRefreshAt = Date.now();
   })().finally(() => {
     promotionRefreshPromise = null;
