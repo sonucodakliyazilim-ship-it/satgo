@@ -154,8 +154,8 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error(err.stack);
   const isDbConnectionError =
-    ['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNABORTED'].includes(err.code) ||
-    /timeout exceeded when trying to connect|connection terminated|connect ETIMEDOUT|getaddrinfo/i.test(err.message || '');
+    ['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNABORTED', '53300', '57P03'].includes(err.code) ||
+    /timeout exceeded when trying to connect|connection terminated|connect ETIMEDOUT|getaddrinfo|too many clients|remaining connection slots/i.test(err.message || '');
   const status = isDbConnectionError
     ? 503
     : err.status || err.statusCode || (err.name === 'MulterError' ? 400 : 500);

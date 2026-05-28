@@ -86,15 +86,19 @@ const numberFromEnv = (name, fallback) => {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 };
 
-const DB_CONNECT_TIMEOUT_MS = Math.min(numberFromEnv('PG_CONNECTION_TIMEOUT_MS', 3000), 5000);
+const DB_CONNECT_TIMEOUT_MS = Math.min(numberFromEnv('PG_CONNECTION_TIMEOUT_MS', 2500), 4000);
+const DB_POOL_MAX = Math.min(numberFromEnv('PGPOOL_MAX', 4), 5);
+const DB_QUERY_RETRIES = Math.min(numberFromEnv('PG_QUERY_RETRIES', 2), 3);
 
 const poolOptionsForUrl = (databaseUrl) => ({
   connectionString: databaseUrl,
   ssl: requiresSslForUrl(databaseUrl) ? { rejectUnauthorized: false } : undefined,
-  max: numberFromEnv('PGPOOL_MAX', 10),
-  idleTimeoutMillis: numberFromEnv('PG_IDLE_TIMEOUT_MS', 30000),
+  max: DB_POOL_MAX,
+  idleTimeoutMillis: numberFromEnv('PG_IDLE_TIMEOUT_MS', 10000),
   connectionTimeoutMillis: DB_CONNECT_TIMEOUT_MS,
   keepAlive: true,
+  maxUses: numberFromEnv('PG_MAX_USES', 750),
+  application_name: process.env.PGAPPNAME || 'satgo-api',
   statement_timeout: numberFromEnv('PG_STATEMENT_TIMEOUT_MS', 20000),
   query_timeout: numberFromEnv('PG_QUERY_TIMEOUT_MS', 20000),
 });
@@ -163,15 +167,19 @@ const CONNECTION_ERROR_CODES = new Set([
   '08000',
   '08001',
   '08003',
+  '08004',
   '08006',
+  '08007',
   '57P01',
+  '57P03',
+  '53300',
 ]);
 
 const isConnectionFailure = (err) => {
   const message = err?.message || '';
   return (
     CONNECTION_ERROR_CODES.has(err?.code) ||
-    /timeout exceeded when trying to connect|connection terminated|connect ETIMEDOUT|getaddrinfo|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN/i.test(message)
+    /timeout exceeded when trying to connect|connection terminated|connect ETIMEDOUT|getaddrinfo|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|too many clients|remaining connection slots/i.test(message)
   );
 };
 
@@ -204,9 +212,31 @@ const runWithPoolFallback = async (action, operation) => {
   throw lastError;
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const runWithPoolRetry = async (action, operation) => {
+  let lastError;
+
+  for (let attempt = 0; attempt <= DB_QUERY_RETRIES; attempt += 1) {
+    try {
+      return await runWithPoolFallback(action, operation);
+    } catch (err) {
+      lastError = err;
+      if (!isConnectionFailure(err) || attempt >= DB_QUERY_RETRIES) {
+        throw err;
+      }
+      const delayMs = 150 * (attempt + 1);
+      console.warn(`[db.retry.${action}] attempt=${attempt + 1} delayMs=${delayMs}:`, err.code || err.message);
+      await sleep(delayMs);
+    }
+  }
+
+  throw lastError;
+};
+
 const pool = {
-  query: (text, params) => runWithPoolFallback('query', (pgPool) => pgPool.query(text, params)),
-  connect: () => runWithPoolFallback('connect', (pgPool) => pgPool.connect()),
+  query: (text, params) => runWithPoolRetry('query', (pgPool) => pgPool.query(text, params)),
+  connect: () => runWithPoolRetry('connect', (pgPool) => pgPool.connect()),
   end: async () => {
     const results = await Promise.allSettled(poolEntries.map((entry) => entry.pool.end()));
     const rejected = results.find((result) => result.status === 'rejected');
