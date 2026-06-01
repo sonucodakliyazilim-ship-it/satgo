@@ -15,13 +15,13 @@ function getDatabaseCandidates() {
 
   const candidateNames = isRailwayRuntime
     ? [
-        'DATABASE_PRIVATE_URL',
-        'RAILWAY_DATABASE_URL',
-        'DATABASE_URL',
         'DATABASE_PUBLIC_URL',
         'POSTGRES_URL',
         'POSTGRES_PRISMA_URL',
         'POSTGRES_URL_NON_POOLING',
+        'DATABASE_URL',
+        'DATABASE_PRIVATE_URL',
+        'RAILWAY_DATABASE_URL',
       ]
     : [
         'DATABASE_URL',
@@ -76,9 +76,13 @@ const getDatabaseHost = (databaseUrl) => {
 const requiresSslForUrl = (databaseUrl) => {
   const databaseHost = getDatabaseHost(databaseUrl);
   const isRailwayPrivateHost = /(^|\.)railway\.internal$/i.test(databaseHost);
-  return hasExplicitSslSetting
-    ? ['true', '1', 'yes'].includes(sslSetting)
-    : !isRailwayPrivateHost && /railway|rlwy|render|neon|supabase|amazonaws/i.test(databaseUrl);
+  const publicManagedHost =
+    !isRailwayPrivateHost && /railway|rlwy|render|neon|supabase|amazonaws/i.test(databaseUrl);
+  if (hasExplicitSslSetting) {
+    const explicitlyEnabled = ['true', '1', 'yes'].includes(sslSetting);
+    return explicitlyEnabled || publicManagedHost;
+  }
+  return publicManagedHost;
 };
 
 const numberFromEnv = (name, fallback) => {
