@@ -78,14 +78,47 @@ const getCurrentAccessToken = () => {
 
 let refreshPromise: Promise<string | null> | null = null
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const isTransientApiError = (error: any) => {
+  const status = error?.response?.status
+  const code = error?.code
+  const message = String(error?.message || '').toLowerCase()
+  return (
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    code === 'ECONNABORTED' ||
+    code === 'ETIMEDOUT' ||
+    message.includes('timeout') ||
+    message.includes('network error')
+  )
+}
+
+const retryTransientRequest = async <T,>(request: () => Promise<T>, retries = 2): Promise<T> => {
+  let lastError: any
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await request()
+    } catch (error: any) {
+      lastError = error
+      if (!isTransientApiError(error) || attempt >= retries) break
+      await sleep(400 * (attempt + 1))
+    }
+  }
+  throw lastError
+}
+
 const requestFreshAccessToken = async () => {
   const refreshToken = getRefreshToken()
 
   try {
-    const { data } = await axios.post(
-      `${API_URL}/auth/refresh`,
-      refreshToken ? { refreshToken } : {},
-      { withCredentials: true, timeout: 15000 },
+    const { data } = await retryTransientRequest(
+      () => axios.post(
+        `${API_URL}/auth/refresh`,
+        refreshToken ? { refreshToken } : {},
+        { withCredentials: true, timeout: 15000 },
+      ),
     )
     const accessToken = data?.data?.accessToken
     if (!accessToken) return null
@@ -177,7 +210,7 @@ api.interceptors.response.use(
 
 export const authApi = {
   register: (d: any) => api.post('/auth/register', d),
-  login: (d: any) => api.post('/auth/login', d, { timeout: 30000 }),
+  login: (d: any) => retryTransientRequest(() => api.post('/auth/login', d, { timeout: 30000 })),
   logout: (refreshToken?: string) => api.post('/auth/logout', refreshToken ? { refreshToken } : {}),
   refresh: (refreshToken: string) => api.post('/auth/refresh', { refreshToken }),
   forgotPassword: (email: string) => api.post('/auth/forgot-password', { email }),

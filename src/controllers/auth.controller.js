@@ -8,14 +8,20 @@ const { assertJwtSecrets, getAccessTokenSecret, getRefreshTokenSecret } = requir
 
 // ── Helpers ───────────────────────────────────────────────────
 
-const generateTokens = (userId, role) => {
+const generateAccessToken = (userId, role) => {
   assertJwtSecrets();
 
-  const accessToken = jwt.sign(
+  return jwt.sign(
     { userId, role, jti: uuidv4() },
     getAccessTokenSecret(),
     { expiresIn: process.env.JWT_EXPIRES_IN || '15m' }
   );
+};
+
+const generateTokens = (userId, role) => {
+  assertJwtSecrets();
+
+  const accessToken = generateAccessToken(userId, role);
   const refreshToken = jwt.sign(
     { userId, role, jti: uuidv4() },
     getRefreshTokenSecret(),
@@ -23,6 +29,10 @@ const generateTokens = (userId, role) => {
   );
   return { accessToken, refreshToken };
 };
+
+const isDbConnectionError = (err) =>
+  ['ETIMEDOUT', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNABORTED', '53300', '57P03'].includes(err?.code) ||
+  /timeout exceeded when trying to connect|connection terminated|connect ETIMEDOUT|getaddrinfo|too many clients|remaining connection slots/i.test(err?.message || '');
 
 const saveRefreshToken = async (userId, token) => {
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
@@ -838,24 +848,34 @@ const refresh = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Geçersiz refresh token.' });
     }
 
-    // Check DB
-    const { rows } = await query(
-      'SELECT * FROM refresh_tokens WHERE token = $1 AND expires_at > NOW()',
-      [refreshToken]
-    );
-    if (!rows.length) {
-      return res.status(401).json({ success: false, message: 'Refresh token süresi dolmuş.' });
+    let accessToken;
+    let responseRefreshToken = refreshToken;
+
+    try {
+      const { rows } = await query(
+        'SELECT * FROM refresh_tokens WHERE token = $1 AND expires_at > NOW()',
+        [refreshToken]
+      );
+      if (!rows.length) {
+        return res.status(401).json({ success: false, message: 'Refresh token süresi dolmuş.' });
+      }
+
+      await query('DELETE FROM refresh_tokens WHERE token = $1', [refreshToken]);
+      const nextTokens = generateTokens(decoded.userId, decoded.role);
+      accessToken = nextTokens.accessToken;
+      responseRefreshToken = nextTokens.refreshToken;
+      persistRefreshToken(decoded.userId, responseRefreshToken);
+    } catch (err) {
+      if (!isDbConnectionError(err)) throw err;
+      console.warn('[auth.refresh] DB unavailable, issuing access token from valid refresh JWT:', err.code || err.message);
+      accessToken = generateAccessToken(decoded.userId, decoded.role);
     }
 
-    // Rotate: delete old, issue new
-    await query('DELETE FROM refresh_tokens WHERE token = $1', [refreshToken]);
-    const { accessToken, refreshToken: newRefresh } = generateTokens(decoded.userId, decoded.role);
-    persistRefreshToken(decoded.userId, newRefresh);
-    setTokenCookies(res, accessToken, newRefresh);
+    setTokenCookies(res, accessToken, responseRefreshToken);
 
     res.json({
       success: true,
-      data: { accessToken, refreshToken: newRefresh },
+      data: { accessToken, refreshToken: responseRefreshToken },
     });
   } catch (err) {
     next(err);

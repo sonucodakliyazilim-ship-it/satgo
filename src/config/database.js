@@ -110,22 +110,39 @@ const makePoolLabel = ({ source, url }) => {
   return host ? `${source} (${host})` : source;
 };
 
-const poolEntries = databaseCandidates.map((candidate) => ({
-  ...candidate,
-  label: makePoolLabel(candidate),
-  pool: new Pool(poolOptionsForUrl(candidate.url)),
-}));
-
-let activePoolIndex = 0;
-
-poolEntries.forEach((entry) => {
+const attachPoolErrorHandler = (entry) => {
   entry.pool.on('error', (err) => {
     console.error(`[db.pool.error] ${entry.label}:`, err.code || err.message);
     if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
       console.error('DB connection lost. Verify database is running.');
     }
   });
-});
+};
+
+const createPoolEntry = (candidate) => {
+  const entry = {
+    source: candidate.source,
+    url: candidate.url,
+    label: makePoolLabel(candidate),
+    pool: new Pool(poolOptionsForUrl(candidate.url)),
+  };
+  attachPoolErrorHandler(entry);
+  return entry;
+};
+
+let poolEntries = databaseCandidates.map(createPoolEntry);
+let activePoolIndex = 0;
+
+const resetPoolEntry = (index, reason) => {
+  const current = poolEntries[index];
+  if (!current) return;
+  console.warn(`[db.pool.reset] ${current.label}:`, reason?.code || reason?.message || reason);
+  const oldPool = current.pool;
+  poolEntries[index] = createPoolEntry(current);
+  oldPool.end().catch((err) => {
+    console.warn(`[db.pool.reset.end.failed] ${current.label}:`, err.message);
+  });
+};
 
 const compactSql = (text) =>
   typeof text === 'string'
@@ -202,6 +219,9 @@ const runWithPoolFallback = async (action, operation) => {
       return result;
     } catch (err) {
       lastError = err;
+      if (isConnectionFailure(err)) {
+        resetPoolEntry(index, err);
+      }
       if (!isConnectionFailure(err) || poolEntries.length === 1) {
         throw err;
       }

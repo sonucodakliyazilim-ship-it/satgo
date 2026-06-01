@@ -180,6 +180,16 @@ app.use((err, req, res, next) => {
 
 socketHandler(io);
 
+const DB_KEEPALIVE_INTERVAL_MS = Math.max(Number(process.env.DB_KEEPALIVE_INTERVAL_MS || 60000), 15000);
+if (process.env.DB_KEEPALIVE !== 'false') {
+  const keepAliveTimer = setInterval(() => {
+    pool.query('SELECT 1').catch((err) => {
+      console.warn('[db.keepalive.failed]', err.code || err.message);
+    });
+  }, DB_KEEPALIVE_INTERVAL_MS);
+  keepAliveTimer.unref?.();
+}
+
 const PORT = process.env.PORT || 5001;
 console.log('[server] listening on port', PORT);
 server.listen(PORT, '0.0.0.0', () => {
