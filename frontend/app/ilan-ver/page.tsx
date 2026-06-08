@@ -92,6 +92,7 @@ type CustomField = {
 
 const MAX_IMAGE_COUNT = 10
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024
+const MAX_IMAGE_SOURCE_BYTES = 80 * 1024 * 1024
 const IMAGE_UPLOAD_TIMEOUT_MS = 45000
 const IMAGE_UPLOAD_RETRIES = 1
 const IMAGE_UPLOAD_PARALLEL_LIMIT = 2
@@ -159,7 +160,9 @@ const optimizeImageForUpload = async (file: File) => {
     bitmap.close?.()
 
     const blob = await canvasToBlob(canvas, 'image/jpeg', IMAGE_CLIENT_JPEG_QUALITY)
-    if (!blob || blob.size >= file.size * 0.95) return file
+    if (!blob) return file
+    if (file.size <= MAX_IMAGE_BYTES && blob.size >= file.size * 0.95) return file
+    if (blob.size >= file.size) return file
 
     const safeName = file.name.replace(/\.[^.]+$/, '') || 'satgo-fotograf'
     return new File([blob], `${safeName}.jpg`, { type: 'image/jpeg', lastModified: file.lastModified || Date.now() })
@@ -167,6 +170,8 @@ const optimizeImageForUpload = async (file: File) => {
     return file
   }
 }
+
+const isGifFile = (file: File) => (file.type || '').toLowerCase() === 'image/gif' || /\.gif$/i.test(file.name)
 
 const isRetriableUploadError = (err: any) => {
   const status = err?.response?.status
@@ -587,7 +592,11 @@ export default function CreateListingPage() {
   const chooseFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files || [])
     const accepted = selected.filter(isDisplayableImageFile)
-    const sized = accepted.filter((file) => file.size <= MAX_IMAGE_BYTES)
+    const sized = accepted.filter((file) => {
+      if (file.size <= MAX_IMAGE_BYTES) return true
+      if (isGifFile(file)) return false
+      return file.size <= MAX_IMAGE_SOURCE_BYTES
+    })
     const room = Math.max(MAX_IMAGE_COUNT - files.length, 0)
 
     if (!room) {
@@ -600,8 +609,12 @@ export default function CreateListingPage() {
       toast.error('Sadece JPG, JPEG, PNG, WEBP, AVIF veya GIF yuklenebilir. HEIC/HEIF kabul edilmiyor.')
     }
 
+    if (accepted.some((file) => file.size > MAX_IMAGE_BYTES && !isGifFile(file) && file.size <= MAX_IMAGE_SOURCE_BYTES)) {
+      toast.success('Büyük fotoğraflar yayınlamadan önce otomatik küçültülecek.')
+    }
+
     if (sized.length !== accepted.length) {
-      toast.error('Fotograf boyutu en fazla 15 MB olabilir.')
+      toast.error('GIF için en fazla 15 MB, diğer görseller için en fazla 80 MB kaynak fotoğraf seçilebilir.')
     }
 
     setFiles((current) => [...current, ...sized.slice(0, room)])
@@ -1252,7 +1265,7 @@ export default function CreateListingPage() {
           <label className="border-2 border-dashed border-gray-200 rounded-xl p-5 flex min-h-36 cursor-pointer flex-col items-center justify-center gap-2 text-center transition-colors hover:border-brand">
             <ImagePlus className="w-7 h-7 text-brand" />
             <span className="text-sm font-semibold">Fotoğraf seç veya sürükle</span>
-            <span className="text-xs text-gray-400">En fazla 10 adet, görsel başı 15 MB. JPG, JPEG, PNG, WEBP, AVIF veya GIF</span>
+            <span className="text-xs text-gray-400">En fazla 10 adet. Büyük JPG/PNG/WEBP/AVIF görseller yayınlamadan önce otomatik küçültülür; GIF en fazla 15 MB.</span>
             <input type="file" multiple accept="image/jpeg,image/png,image/webp,image/avif,image/gif,.jpg,.jpeg,.png,.webp,.avif,.gif" onChange={chooseFiles} className="hidden" />
           </label>
           {!!previews.length && (

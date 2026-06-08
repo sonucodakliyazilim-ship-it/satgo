@@ -93,12 +93,21 @@ export default function CustomFieldsManager() {
   const load = async () => {
     setLoading(true)
     try {
-      const [categoryResponse, fieldResponse] = await Promise.all([
+      const [categoryResult, fieldResult] = await Promise.allSettled([
         categoriesApi.getAll({ include_inactive: true }),
         customFieldsApi.adminList(),
       ])
-      setCategories(categoryResponse.data.data || [])
-      setFields(fieldResponse.data.data || [])
+      if (categoryResult.status === 'fulfilled') {
+        setCategories(categoryResult.value.data.data || [])
+      } else {
+        toast.error(categoryResult.reason?.response?.data?.message || 'Kategori listesi alınamadı')
+      }
+      if (fieldResult.status === 'fulfilled') {
+        setFields(fieldResult.value.data.data || [])
+      } else {
+        setFields([])
+        toast.error(fieldResult.reason?.response?.data?.message || 'Alan listesi alınamadı')
+      }
     } catch (err: any) {
       toast.error(err?.response?.data?.message || 'Alan listesi alınamadı')
     } finally {

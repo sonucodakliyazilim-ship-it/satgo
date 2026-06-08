@@ -2,6 +2,7 @@ const { query, withTransaction } = require('../config/database');
 
 const FIELD_TYPES = new Set(['text', 'number', 'select', 'radio', 'checkbox', 'multi_select', 'textarea']);
 const OPTION_FIELD_TYPES = new Set(['select', 'radio', 'multi_select']);
+const CUSTOM_FIELD_SCHEMA_ENSURE_ON_REQUEST = process.env.CUSTOM_FIELD_SCHEMA_ENSURE === 'true';
 
 const normalizeTurkish = (value) =>
   String(value || '')
@@ -212,6 +213,9 @@ const ensureTables = async () => {
   await query('CREATE INDEX IF NOT EXISTS idx_listing_field_values_listing ON listing_field_values (listing_id)');
 };
 
+const ensureTablesForRequest = () =>
+  CUSTOM_FIELD_SCHEMA_ENSURE_ON_REQUEST ? ensureTables() : Promise.resolve();
+
 const appendOptions = async (fields, client = null) => {
   const runner = client || { query };
   for (const field of fields) {
@@ -229,7 +233,7 @@ const appendOptions = async (fields, client = null) => {
 
 const getCustomFields = async (req, res, next) => {
   try {
-    await ensureTables();
+    await ensureTablesForRequest();
     const categoryId = Number(req.query.sub_category_id || req.query.category_id);
     if (!categoryId) {
       return res.status(422).json({ success: false, message: 'category_id gerekli.' });
@@ -268,7 +272,7 @@ const getCustomFields = async (req, res, next) => {
 
 const adminList = async (req, res, next) => {
   try {
-    await ensureTables();
+    await ensureTablesForRequest();
     const { rows } = await query(
       `SELECT f.id, f.category_id, f.label, f."key", f."type", f."required",
               f.sort_order, f.is_active, f.created_at, f.updated_at,
@@ -288,7 +292,7 @@ const adminList = async (req, res, next) => {
 
 const adminUpsert = async (req, res, next) => {
   try {
-    await ensureTables();
+    await ensureTablesForRequest();
     const body = req.body || {};
     const categoryId = Number(body.sub_category_id || body.category_id);
     const cleanLabel = String(body.label || '').trim();
@@ -394,7 +398,7 @@ const adminUpsert = async (req, res, next) => {
 
 const adminDelete = async (req, res, next) => {
   try {
-    await ensureTables();
+    await ensureTablesForRequest();
     const { rows } = await query(
       `UPDATE custom_fields
        SET is_active = FALSE, updated_at = NOW()
